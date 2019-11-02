@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 
 def evaluate(data_cfg, weightfile, listfile, outdir, object_names, intrinsics, vertex,
-                         bestCnt, conf_thresh, linemod_index=False, use_gpu=False, gpu_id='0'):
+                         bestCnt, conf_thresh, use_gpu=False, gpu_id='0'):
     if not os.path.exists(outdir):
         os.makedirs(outdir)
 
@@ -28,11 +28,9 @@ def evaluate(data_cfg, weightfile, listfile, outdir, object_names, intrinsics, v
 
         dirname, filename = os.path.split(imgfile)
         baseName, _ = os.path.splitext(filename)
-        if linemod_index:
-            outFileName = baseName[-4:]
-        else:
-            dirname = os.path.splitext(dirname[dirname.rfind('/') + 1:])[0]
-            outFileName = dirname+'_'+baseName
+
+        dirname = os.path.splitext(dirname[dirname.rfind('/') + 1:])[0]
+        outFileName = dirname+'_'+baseName
 
         start = time.time()
         predPose = do_detect(m, img, intrinsics, bestCnt, conf_thresh, use_gpu)
@@ -56,8 +54,6 @@ if __name__ == '__main__':
     use_gpu = True
     # use_gpu = False
     # #
-    # dataset = 'Occluded-LINEMOD'
-    # outdir = './Occluded-LINEMOD-Out'
 
     dataset = 'YCB-Video'
     outdir = './exp007-Result'
@@ -65,23 +61,7 @@ if __name__ == '__main__':
     # dataset = 'our-YCB-Video'
     # outdir = './our-YCB-result'
 
-    if dataset == 'Occluded-LINEMOD':
-        # intrinsics of LINEMOD dataset
-        k_linemod = np.array([[572.41140, 0.0, 325.26110],
-                              [0.0, 573.57043, 242.04899],
-                              [0.0, 0.0, 1.0]])
-        # 8 objects for LINEMOD dataset
-        object_names_occlinemod = ['ape', 'can', 'cat', 'driller', 'duck', 'eggbox', 'glue', 'holepuncher']
-        vertex_linemod = np.load('./data/Occluded-LINEMOD/LINEMOD_vertex.npy')
-        evaluate('./data/data-LINEMOD.cfg',
-                             './model/occluded-linemod.pth',
-                             './occluded-linemod-testlist.txt',
-                             outdir, object_names_occlinemod, k_linemod, vertex_linemod,
-                             bestCnt=10, conf_thresh=0.3, linemod_index=True, use_gpu=use_gpu)
-        #
-        rt_transforms = np.load('./data/Occluded-LINEMOD/Transform_RT_to_OccLINEMOD_meshes.npy')
-        transform_pred_pose(outdir, object_names_occlinemod, rt_transforms)
-    elif dataset == 'YCB-Video':
+    if dataset == 'YCB-Video':
         # intrinsics of YCB-VIDEO dataset
         k_ycbvideo = np.array([[1.06677800e+03, 0.00000000e+00, 3.12986900e+02],
                                [0.00000000e+00, 1.06748700e+03, 2.41310900e+02],

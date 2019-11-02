@@ -16,13 +16,20 @@ from tqdm import tqdm
 
 # choose dataset/env/exp info
 dataset = 'YCB-Video'
-test_env = 'sjtu'
-exp_id = '007'
+test_env = 'pomini'
+exp_id = '0000'
 print(exp_id, test_env)
-# Paths
+
+"""
 if test_env == 'sjtu':
     ycb_root = "/media/data_2/YCB"
     imageset_path = '/media/data_2/YCB/ycb_video_data_share/image_sets'
+"""
+
+# Paths
+if test_env == 'pomini':
+    ycb_root = "/cvlabdata1/cvlab/datasets_pomini/YCB_Video_Dataset/YCB_Video_Dataset"
+    imageset_path = "/cvlabdata1/cvlab/datasets_pomini/YCB_Video_Dataset/YCB_Video_Dataset/image_sets"
 
 ycb_data_path = opj(ycb_root, "data")
 syn_data_path = opj(ycb_root,"data_syn")
@@ -30,6 +37,7 @@ kp_path = "./data/YCB-Video/YCB_bbox.npy"
 weight_path = "./model/exp" + exp_id + ".pth"
 load_weight_from_path = "./model/exp006.pth"
 
+"""
 # Device configuration
 if test_env == 'sjtu':
     cuda_visible = "0,1,2,3"
@@ -39,6 +47,16 @@ if test_env == 'sjtu':
     use_real_img = True
     num_syn_img = 0
     bg_path = "/media/data_2/VOCdevkit/VOC2012/JPEGImages"
+"""
+
+if test_env == 'pomini':
+    cuda_visible = "0"
+    gpu_id = [0]
+    batch_size = 8
+    num_workers = 4
+    use_real_img = False
+    num_syn_images = 100
+    bg_path = "/cvlabdata1/cvlab/datasets_pomini/PASCAL3D+_release1.1/PASCAL/VOCdevkit/VOC2012/JPEGImages"
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -179,23 +197,8 @@ def train(data_cfg):
     writer.close()
 
 if __name__ == '__main__':
-    if dataset == 'Occluded-LINEMOD':
-        # intrinsics of LINEMOD dataset
-        k_linemod = np.array([[572.41140, 0.0, 325.26110],
-                              [0.0, 573.57043, 242.04899],
-                              [0.0, 0.0, 1.0]])
-        # # 8 objects for LINEMOD dataset
-        # object_names_occlinemod = ['ape', 'can', 'cat', 'driller', 'duck', 'eggbox', 'glue', 'holepuncher']
-        # vertex_linemod = np.load('./data/Occluded-LINEMOD/LINEMOD_vertex.npy')
-        # train('./data/data-LINEMOD.cfg',
-        #                      './model/occluded-linemod.pth',
-        #                      './occluded-linemod-testlist.txt',
-        #                      outdir, object_names_occlinemod, k_linemod, vertex_linemod,
-        #                      bestCnt=10, conf_thresh=0.3, linemod_index=True)
-        #
-        # rt_transforms = np.load('./data/Occluded-LINEMOD/Transform_RT_to_OccLINEMOD_meshes.npy')
-        # transform_pred_pose(outdir, object_names_occlinemod, rt_transforms)
-    elif dataset == 'YCB-Video':
+
+    if dataset == 'YCB-Video':
         # 21 objects for YCB-Video dataset
         object_names_ycbvideo = ['002_master_chef_can', '003_cracker_box', '004_sugar_box', '005_tomato_soup_can', '006_mustard_bottle',
                                  '007_tuna_fish_can', '008_pudding_box', '009_gelatin_box', '010_potted_meat_can', '011_banana',
