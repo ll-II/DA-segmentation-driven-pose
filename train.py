@@ -50,9 +50,9 @@ if test_env == 'sjtu':
 """
 
 if test_env == 'pomini':
-    cuda_visible = "0"
-    gpu_id = [0]
-    batch_size = 8
+    cuda_visible = "1"
+    gpu_id = [1]
+    batch_size = 4
     num_workers = 4
     use_real_img = False
     num_syn_images = 100

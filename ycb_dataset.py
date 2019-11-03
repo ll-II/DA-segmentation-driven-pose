@@ -16,7 +16,7 @@ import torchvision.transforms as transforms
 opj = os.path.join
 
 class YCB_Dataset(torch.utils.data.Dataset):
-    def __init__(self, root, imageset_path, syn_data_path=None, use_real_img = True, num_syn_images=200000 ,target_h=76, target_w=76
+    def __init__(self, root, imageset_path, syn_data_path=None, use_real_img = True, syn_range=70000, num_syn_images=200000 ,target_h=76, target_w=76
                  , bg_path = None, kp_path="data/YCB-Video/YCB_bbox.npy", data_cfg="data/data-YCB.cfg",
                  use_bg_img = True):
         self.root = root
@@ -33,7 +33,7 @@ class YCB_Dataset(torch.utils.data.Dataset):
 
         self.use_real_img = use_real_img
         self.syn_data_path = syn_data_path
-        self.syn_range = 80000 # YCB has 80000 syn images in total, continuously indexed
+        self.syn_range = syn_range # YCB has 80000 syn images in total, continuously indexed. We keep a few images for testing.
         self.syn_bg_image_paths = get_img_list_from(bg_path) if bg_path is not None else []
         self.use_bg_img = use_bg_img
         self.num_syn_images = num_syn_images # syn images for training
