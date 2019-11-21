@@ -103,7 +103,42 @@ def convert2cpu(gpu_matrix):
 def convert2cpu_long(gpu_matrix):
     return torch.LongTensor(gpu_matrix.shape).copy_(gpu_matrix)
 
-def do_detect(model, rawimg, intrinsics, bestCnt, conf_thresh, use_gpu=False):
+
+#debugging
+def show_seg(img, output, batchIdx, width, height):
+
+    cls_confs = output[0][0][batchIdx]
+    cls_ids = output[0][1][batchIdx]
+    segshowimg = np.copy(img)
+
+    #segshowimg = img.clone()
+    #segshowimg = segshowimg.permute(0, 2, 3, 1).numpy()
+
+    nC = cls_ids.max() + 1
+
+    for cidx in range(nC):
+        # skip background
+        if cidx == 0:
+            continue
+        foremask = (cls_ids == cidx)
+        cidx -= 1
+
+        foreCnt = foremask.sum()
+        if foreCnt < 1:
+            continue
+
+        nH, nW = foremask.shape
+        labIdx = np.argwhere(foremask == 1)
+        for i in range(len(labIdx)):
+            tmpy = int(((labIdx[i][0] + 0.5) / nH) * height + 0.5)
+            tmpx = int(((labIdx[i][1] + 0.5) / nW) * width + 0.5)
+            tmpr = 7
+#            print("DEBUG:", type(segshowimg), type(tmpx), type(tmpy), type(tmpr), get_class_colors(cidx))
+            cv2.rectangle(segshowimg, (tmpx-tmpr,tmpy-tmpr), (tmpx+tmpr,tmpy+tmpr), get_class_colors(cidx), -1)
+#            print("DEBUG:, ", (tmpx-tmpr,tmpy-tmpr), "to: ", (tmpx+tmpr,tmpy+tmpr), " ; color : ", get_class_colors(cidx))
+    return segshowimg
+
+def do_detect(model, rawimg, intrinsics, bestCnt, conf_thresh, use_gpu=False, seg_save_path=None):
     model.eval()
     t0 = time.time()
 
@@ -124,9 +159,15 @@ def do_detect(model, rawimg, intrinsics, bestCnt, conf_thresh, use_gpu=False):
 
     out_preds = model(img)
 
+    if seg_save_path:
+        seg_img = show_seg(rawimg, out_preds, 0, width, height)
+        print("DEBUG seg path: ", seg_save_path)
+        cv2.imwrite(seg_save_path, seg_img)
+
+
     t3 = time.time()
 
-    predPose = fusion(out_preds, width, height, intrinsics, conf_thresh, 0, bestCnt)
+    predPose, p2d = fusion(out_preds, width, height, intrinsics, conf_thresh, 0, bestCnt, rawimg, seg_save_path)
 
     t4 = time.time()
 
@@ -142,9 +183,11 @@ def do_detect(model, rawimg, intrinsics, bestCnt, conf_thresh, use_gpu=False):
         print('-----------------------------------')
     return predPose
 
-def fusion(output, width, height, intrinsics, conf_thresh, batchIdx, bestCnt):
+def fusion(output, width, height, intrinsics, conf_thresh, batchIdx, bestCnt, rawimg, seg_save_path):
     layerCnt = len(output)
     assert(layerCnt == 2)
+
+    inlierImg = np.copy(rawimg)
 
     cls_confs = output[0][0][batchIdx]
     cls_ids = output[0][1][batchIdx]
@@ -217,6 +260,13 @@ def fusion(output, width, height, intrinsics, conf_thresh, batchIdx, bestCnt):
         if len(p3d) < 6:
             continue
 
+        #c DEBUG: show the selected 2D reprojections
+        if True:
+            for i in range(len(p2d)):
+                x = p2d[i][0]
+                y = p2d[i][1]
+                inlierImg = cv2.circle(inlierImg, (int(x), int(y)), 2, get_class_colors(cidx), -1)
+
         retval, rot, trans, inliers = cv2.solvePnPRansac(p3d, p2d, intrinsics, None, flags=cv2.SOLVEPNP_EPNP)
 
         if not retval:
@@ -228,7 +278,11 @@ def fusion(output, width, height, intrinsics, conf_thresh, batchIdx, bestCnt):
 
         outPred.append([cidx, rt, 1, None, None, None, [cidx], -1, [0], [0], None])
 
-    return outPred
+    points_path = seg_save_path[:-4] + "-points.jpg"
+    print("DEBUG: save points to ", points_path)
+    cv2.imwrite(points_path, inlierImg)
+
+    return outPred, p2d
 
 def read_data_cfg(datacfg):
     options = dict()

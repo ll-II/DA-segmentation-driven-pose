@@ -1,10 +1,13 @@
+import os
+gpu_id = '3'
+os.environ['CUDA_VISIBLE_DEVICES'] = gpu_id
 from utils import *
 from segpose_net import SegPoseNet
 import cv2
 import numpy as np
 
 def evaluate(data_cfg, weightfile, listfile, outdir, object_names, intrinsics, vertex,
-                         bestCnt, conf_thresh, use_gpu=False, gpu_id='0'):
+                         bestCnt, conf_thresh, use_gpu=False):
     if not os.path.exists(outdir):
         os.makedirs(outdir)
 
@@ -33,7 +36,7 @@ def evaluate(data_cfg, weightfile, listfile, outdir, object_names, intrinsics, v
         outFileName = dirname+'_'+baseName
 
         start = time.time()
-        predPose = do_detect(m, img, intrinsics, bestCnt, conf_thresh, use_gpu)
+        predPose = do_detect(m, img, intrinsics, bestCnt, conf_thresh, use_gpu, seg_save_path= outdir + "/seg-" + str(idx) + ".jpg")
         finish = time.time()
 
         arch = 'CPU'
@@ -52,11 +55,11 @@ def evaluate(data_cfg, weightfile, listfile, outdir, object_names, intrinsics, v
 
 if __name__ == '__main__':
     use_gpu = True
-    # use_gpu = False
+    #use_gpu = False
     # #
 
     dataset = 'YCB-Video'
-    outdir = './exp007-Result'
+    outdir = './exp-syn-train-4x-17'
 
     # dataset = 'our-YCB-Video'
     # outdir = './our-YCB-result'
@@ -73,9 +76,10 @@ if __name__ == '__main__':
                                  '037_scissors', '040_large_marker', '051_large_clamp', '052_extra_large_clamp', '061_foam_brick']
         vertex_ycbvideo = np.load('./data/YCB-Video/YCB_vertex.npy')
         evaluate('./data/data-YCB.cfg',
-                             # './model/ycb-video.pth',
-                            './model/exp007.pth',
-                             './ycb-video-testlist.txt',
+                            #'../others/SegPose/weights_before_DA/yinlin_old_30.pth',
+                            './model/expsyn_train_4x-17.pth',
+                            '/cvlabdata1/cvlab/datasets_pomini/YCB_Video_Dataset/YCB_Video_Dataset/syn_val_100.txt',
+                             #'./ycb-video-testlist.txt',
                              outdir, object_names_ycbvideo, k_ycbvideo, vertex_ycbvideo,
                              bestCnt=10, conf_thresh=0.3, use_gpu=use_gpu)
     elif dataset == 'our-YCB-Video':
@@ -95,6 +99,6 @@ if __name__ == '__main__':
                              './model/ycb-video.pth',
                              './our-ycb-testlist.txt',
                              outdir, object_names_ycbvideo, k_ycbvideo, vertex_ycbvideo,
-                             bestCnt=10, conf_thresh=0.3, use_gpu=use_gpu)
+                             bestCnt=10, conf_thresh=0.8, use_gpu=use_gpu)
     else:
         print('unsupported dataset \'%s\'.' % dataset)

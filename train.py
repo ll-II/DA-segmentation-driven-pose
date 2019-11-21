@@ -1,3 +1,12 @@
+
+import os
+use_gpu = True
+if use_gpu:
+    cuda_visible="1,2,3"
+    #gpu_id=[int(n) for n in cuda_visible.split(',')]
+    gpu_id = range(len(cuda_visible.split(',')))
+    os.environ['CUDA_VISIBLE_DEVICES'] = cuda_visible
+
 import torch.utils.data
 import numpy as np
 from utils import *
@@ -14,11 +23,39 @@ opj = os.path.join
 import argparse
 from tqdm import tqdm
 
+def network_grad_ratio(model):
+    '''
+    for debug
+    :return:
+    '''
+    gradsum = 0
+    datasum = 0
+    layercnt = 0
+    for name, param in model.named_parameters():
+#        print(name)
+        if param.grad is not None:
+            grad = param.grad.abs().mean()
+            data = param.data.abs().mean()
+#            print(name, grad/data)
+            gradsum += grad
+            datasum += data
+            layercnt += 1
+    gradsum /= layercnt
+    datasum /= layercnt
+#    exit(0)
+    return gradsum, datasum
+
+
 # choose dataset/env/exp info
 dataset = 'YCB-Video'
 test_env = 'pomini'
-exp_id = '0000'
+exp_id = 'syn_train_4'
 print(exp_id, test_env)
+
+
+
+print("available gpus: ",  torch.cuda.device_count())
+print(torch.cuda.get_device_properties(0))
 
 """
 if test_env == 'sjtu':
@@ -34,8 +71,9 @@ if test_env == 'pomini':
 ycb_data_path = opj(ycb_root, "data")
 syn_data_path = opj(ycb_root,"data_syn")
 kp_path = "./data/YCB-Video/YCB_bbox.npy"
-weight_path = "./model/exp" + exp_id + ".pth"
-load_weight_from_path = "./model/exp006.pth"
+weight_path = lambda epoch: "./model/exp" + exp_id + "-" + str(epoch) + ".pth"
+#load_weight_from_path = None
+load_weight_from_path = "./model/expsyn_train_4x-19.pth"
 
 """
 # Device configuration
@@ -50,36 +88,33 @@ if test_env == 'sjtu':
 """
 
 if test_env == 'pomini':
-    cuda_visible = "1"
-    gpu_id = [1]
-    batch_size = 4
-    num_workers = 4
+#    cuda_visible = "1"
+#    gpu_id = [1]
+    batch_size = 10
+    num_workers = 2
     use_real_img = False
-    num_syn_images = 100
+    syn_range = 70000
+    num_syn_img = 50000
+    save_interval = 1
+    use_bg_img = False
     bg_path = "/cvlabdata1/cvlab/datasets_pomini/PASCAL3D+_release1.1/PASCAL/VOCdevkit/VOC2012/JPEGImages"
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+#device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Hyper-parameters
-initial_lr = 0.001
+#initial_lr = 0.001
+initial_lr = 0.0001
 momentum = 0.9
 weight_decay = 5e-4
-num_epoch = 30
-use_gpu = True
+num_epoch = 10
+#num_epoch = 1000
+#use_gpu = True
 gen_kp_gt = False
 number_point = 8
 modulating_factor = 1.0
 
 # Device configuration
-device = torch.device('cuda' if torch.cuda.is_available() and use_gpu else 'cpu')
-
-# Loss configurations
-seg_loss = nn.CrossEntropyLoss()
-pos_loss = nn.L1Loss()
-pos_loss_factor = 1.8 # 0.02 in original paper
-conf_loss = nn.L1Loss()
-conf_loss_factor = 0.8 # 0.02 in original paper
-
+#device = torch.device('cuda' if torch.cuda.is_available() and use_gpu else 'cpu')
 # summary writer
 if test_env =="sjtu":
     writer = SummaryWriter(log_dir='./log'+exp_id, comment='training log')
@@ -103,30 +138,34 @@ def train(data_cfg):
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [int(0.5*num_epoch), int(0.75*num_epoch),
                                                                  int(0.9*num_epoch)], gamma=0.1)
     if use_gpu:
-        os.environ['CUDA_VISIBLE_DEVICES'] = cuda_visible
+ #       os.environ['CUDA_VISIBLE_DEVICES'] = cuda_visible
+#        if len(gpu_id) > 1:
         m = torch.nn.DataParallel(m, device_ids=gpu_id)
         m.cuda()
 
     train_dataset = YCB_Dataset(ycb_data_path, imageset_path, syn_data_path=syn_data_path, target_h=o_h, target_w=o_w,
-                      use_real_img=use_real_img, bg_path=bg_path, num_syn_images=num_syn_img,
-                                data_cfg="data/data-YCB.cfg", kp_path=kp_path)
+                      use_real_img=use_real_img, bg_path=bg_path, syn_range=syn_range, num_syn_images=num_syn_img,
+                                data_cfg="data/data-YCB.cfg", kp_path=kp_path, use_bg_img=use_bg_img)
     median_balancing_weight = train_dataset.weight_cross_entropy.cuda() if use_gpu \
         else train_dataset.weight_cross_entropy
 
     print('training on %d images'%len(train_dataset))
     if gen_kp_gt:
-        train_dataset.gen_kp_gt()
+        train_dataset.gen_kp_gt(for_syn=True, for_real=False)
 
     # Loss configurations
-    seg_loss = nn.CrossEntropyLoss(weight=median_balancing_weight)
+    #print("DEBUG train.py: balacing weight: ", median_balancing_weight)
+    #seg_loss = nn.CrossEntropyLoss(weight=median_balancing_weight)
+
+    seg_loss = nn.CrossEntropyLoss()
     pos_loss = nn.L1Loss()
-    pos_loss_factor = 1.3  # 0.02 in original paper
+    #pos_loss_factor = 1.3  # 0.02 in original paper
     conf_loss = nn.L1Loss()
-    conf_loss_factor = 0.8  # 0.02 in original paper
+    #conf_loss_factor = 0.8  # 0.02 in original paper
+    pos_loss_factor, conf_loss_factor = 2.6, 0.8
 
     # split into train and val
     train_db, val_db = torch.utils.data.random_split(train_dataset, [len(train_dataset)-2000, 2000])
-
 
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset, # not use validation now
                                                batch_size=batch_size, num_workers=num_workers,
@@ -146,6 +185,13 @@ def train(data_cfg):
                 kp_gt_x = kp_gt_x.cuda()
                 kp_gt_y = kp_gt_y.cuda()
                 mask_front = mask_front.cuda()
+
+            #print("DEBUG train.py, gt_x = ", kp_gt_x.size(), " , gt_y = ", kp_gt_y.size())
+            #for x in range(76):
+                #for y in range(76):
+                    #pass
+                    #print("X: ", x, "Y: ", y)
+                    #print(kp_gt_x[:, x, y, :])
 
             # forward pass
             output = m(images)
@@ -177,7 +223,12 @@ def train(data_cfg):
             all_loss.backward()
             optimizer.step()
 
-            if (i + 1) % 100 == 0:
+            # gradient debug
+            avggrad, avgdata = network_grad_ratio(m)
+            print('avg gradiant ratio: %f, %f, %f' % (avggrad, avgdata, avggrad/avgdata))
+
+
+            if (i + 1) % 20 == 0:
                 # compute pixel-wise bias to measure training accuracy
                 bias_acc.update(abs(pnz((pred_x - kp_gt_x).cpu()).mean()*i_w))
                 print('Epoch [{}/{}], Step [{}/{}]: \n seg loss: {:.4f}, pos loss: {:.4f}, conf loss: {:.4f}, '
@@ -191,9 +242,13 @@ def train(data_cfg):
                 writer.add_scalar('pixel_wise bias', bias_acc.value, epoch*total_step+i)
         bias_acc._reset()
         scheduler.step()
-        if epoch % 5 == 1:
-            m.module.save_weights(weight_path)
-    m.module.save_weights(weight_path)
+
+        # save weights
+        if (epoch+1) % save_interval == 0:
+            print("save weights to: ", weight_path(epoch))
+            m.module.save_weights(weight_path(epoch))
+
+    m.module.save_weights(weight_path(epoch))
     writer.close()
 
 if __name__ == '__main__':

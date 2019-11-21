@@ -16,7 +16,7 @@ import torchvision.transforms as transforms
 opj = os.path.join
 
 class YCB_Dataset(torch.utils.data.Dataset):
-    def __init__(self, root, imageset_path, syn_data_path=None, use_real_img = True, syn_range=70000, num_syn_images=200000 ,target_h=76, target_w=76
+    def __init__(self, root, imageset_path, syn_data_path=None, use_real_img = True, syn_range=70000, num_syn_images=70000 ,target_h=76, target_w=76
                  , bg_path = None, kp_path="data/YCB-Video/YCB_bbox.npy", data_cfg="data/data-YCB.cfg",
                  use_bg_img = True):
         self.root = root
@@ -54,8 +54,6 @@ class YCB_Dataset(torch.utils.data.Dataset):
         self.kp3d = np.load(kp_path)
         self.n_kp = 8
 
-
-
     def gen_train_list(self, imageset_path, out_pkl="data/real_train_path.pkl"):
         with open(opj(imageset_path, "trainval.txt"), 'r') as file:
             trainlines = file.readlines()
@@ -82,6 +80,8 @@ class YCB_Dataset(torch.utils.data.Dataset):
 
         kp_2d[:, :, 0] /= self.original_width
         kp_2d[:, :, 1] /= self.original_height
+
+        print(kp_2d)
         with open(out_pkl, 'wb') as f:
             pickle.dump(kp_2d, f)
 
@@ -144,13 +144,20 @@ class YCB_Dataset(torch.utils.data.Dataset):
 
         # load class info
         meta = loadmat(item + '-meta.mat')
-        class_ids = meta['cls_indexes']
+
+        #class_ids = meta['cls_indexes']    CORRECTION BELOW
+        class_ids = meta['cls_indexes'][0]
         with open(in_pkl, 'rb') as f:
             bb8_2d = pickle.load(f)
         for i, cid in enumerate(class_ids):
-            class_mask = np.where(seg_label == cid[0])
+            class_mask = np.where(seg_label == cid)
+          #  class_mask = np.where(seg_label == cid[0])    CORRECTION ABOVE
+#            print("CID: ", cid, "bb82d0: ", bb8_2d[:, :, 0][i], "bb82d1", bb8_2d[:, :, 1][i])
             kp_gt_map_x[class_mask] = bb8_2d[:,:,0][i]
             kp_gt_map_y[class_mask] = bb8_2d[:,:,1][i]
+
+        # DEBUG: save 100 syn image
+#        cv2.imwrite("./junk/syn-img-" + str(random.randint(0, 100)) + ".jpg",cv2.cvtColor(combined_img, cv2.COLOR_RGB2BGR))
 
         # this mask front is used to compute loss
         mask_front = cv2.resize(mask_front, (self.target_h, self.target_w), interpolation=cv2.INTER_NEAREST)
