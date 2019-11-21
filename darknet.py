@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from reversal import GradientReversal
 from cfg import *
 
 class MaxPoolStride1(nn.Module):
@@ -90,7 +91,7 @@ class Darknet(nn.Module):
             #    return x
             if block['type'] == 'net':
                 continue
-            elif block['type'] in ['convolutional', 'deconvolutional', 'maxpool', 'reorg', 'upsample', 'avgpool', 'softmax', 'connected']:
+            elif block['type'] in ['convolutional', 'deconvolutional', 'maxpool', 'reorg', 'upsample', 'avgpool', 'softmax', 'connected', 'gradient_reversal']:
                 x = self.models[ind](x)
                 outputs[ind] = x
             elif block['type'] == 'route':
@@ -133,7 +134,7 @@ class Darknet(nn.Module):
 
     def create_network(self, blocks):
         models = nn.ModuleList()
-    
+
         prev_filters = self.channels
         out_filters =[]
         prev_stride = 1
@@ -260,9 +261,17 @@ class Darknet(nn.Module):
                 out_filters.append(prev_filters)
                 out_strides.append(prev_stride)
                 models.append(model)
+            elif block['type'] == 'gradient_reversal':
+                if 'scale' in block:
+                    model = GradientReversal(block['scale'])
+                else:
+                    model = GradientReversal()
+                models.append(model)
+                out_filters.append(prev_filters)
+                out_strides.append(prev_stride)
             else:
                 print('unknown type %s' % (block['type']))
-    
+
         return models
 
     def load_weights(self, weightfile):

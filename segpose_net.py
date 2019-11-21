@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from darknet import Darknet
+from discriminator import Discriminator
 from pose_2d_layer import Pose2DLayer
 from pose_seg_layer import PoseSegLayer
 from utils import *
@@ -13,6 +14,7 @@ class SegPoseNet(nn.Module):
         self.width = int(data_options['width'])
         self.height = int(data_options['height'])
         self.channels = int(data_options['channels'])
+        self.domains = int(data_options['domains'])
 
         # note you need to change this after modifying the network
         self.output_h = 76
@@ -21,6 +23,7 @@ class SegPoseNet(nn.Module):
         self.coreModel = Darknet(pose_arch_cfg, self.width, self.height, self.channels)
         self.segLayer = PoseSegLayer(data_options)
         self.regLayer = Pose2DLayer(data_options)
+        self.discLayer = Discriminator()
         self.training = False
 
     def forward(self, x, y = None):
@@ -28,25 +31,29 @@ class SegPoseNet(nn.Module):
             outlayers = self.coreModel(x)
             out1 = self.segLayer(outlayers[0])
             out2 = self.regLayer(outlayers[1])
-            out_preds = [out1, out2]
+            out3 = self.discLayer(outlayers[2])
+            out_preds = [out1, out2, out3]
             return out_preds
         else:
             outlayers = self.coreModel(x)
             out1 = self.segLayer(outlayers[0])
             out2 = self.regLayer(outlayers[1])
-            out_preds = [out1, out2]
+            out3 = self.discLayer(outlayers[2])
+            out_preds = [out1, out2, out3]
             return out_preds
 
     def train(self):
         self.coreModel.train()
         self.segLayer.train()
         self.regLayer.train()
+        self.discLayer.train()
         self.training = True
 
     def eval(self):
         self.coreModel.eval()
         self.segLayer.eval()
         self.regLayer.eval()
+        self.discLayer.eval()
         self.training = False
 
     def print_network(self):

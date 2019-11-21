@@ -158,11 +158,18 @@ def train(data_cfg):
     #seg_loss = nn.CrossEntropyLoss(weight=median_balancing_weight)
 
     seg_loss = nn.CrossEntropyLoss()
+    seg_loss_factor = 1
+
     pos_loss = nn.L1Loss()
-    #pos_loss_factor = 1.3  # 0.02 in original paper
+    pos_loss_factor = 2.6  # 1.3
+
     conf_loss = nn.L1Loss()
-    #conf_loss_factor = 0.8  # 0.02 in original paper
-    pos_loss_factor, conf_loss_factor = 2.6, 0.8
+    conf_loss_factor = 0.8  # 0.02 in original paper
+
+    disc_loss = nn.CrossEntropyLoss()
+    disc_loss_factor = 1.0
+
+    #pos_loss_factor, conf_loss_factor = 2.6 , 0.8
 
     # split into train and val
     train_db, val_db = torch.utils.data.random_split(train_dataset, [len(train_dataset)-2000, 2000])
@@ -177,7 +184,7 @@ def train(data_cfg):
     total_step = len(train_loader)
     for epoch in range(num_epoch):
         i=-1
-        for images, seg_label, kp_gt_x, kp_gt_y, mask_front in tqdm(train_loader):
+        for images, seg_label, kp_gt_x, kp_gt_y, mask_front, domains in tqdm(train_loader): # TODO add variable 'domains'
             i += 1
             if use_gpu:
                 images = images.cuda()
@@ -199,8 +206,7 @@ def train(data_cfg):
             # segmentation
             pred_seg = output[0] # (BxOHxOW,C)
             seg_label = seg_label.view(-1)
-
-            l_seg =seg_loss(pred_seg, seg_label)
+            l_seg = seg_loss(pred_seg, seg_label)
 
             # regression
             mask_front = mask_front.repeat(number_point,1, 1, 1).permute(1,2,3,0).contiguous() # (B,OH,OW,NV)
@@ -217,8 +223,15 @@ def train(data_cfg):
             conf_target = conf_target.detach()
             l_conf = conf_loss(conf, conf_target)
 
+            # discriminator
+
+            pred_domains = output[3]
+            print("DEBUG train.py: pred_domains = ", pred_domains, "\ndomains = ", domains)
+            exit(0)
+            l_disc = disc_loss(pred_domains, domains)
+
             # combine all losses
-            all_loss = l_seg + l_pos * pos_loss_factor + l_conf * conf_loss_factor
+            all_loss = l_seg * seg_loss_factor + l_pos * pos_loss_factor + l_conf * conf_loss_factor + l_disc * disc_loss_factor
             optimizer.zero_grad()
             all_loss.backward()
             optimizer.step()
@@ -239,6 +252,7 @@ def train(data_cfg):
                 writer.add_scalar('seg_loss', l_seg.item(), epoch*total_step+i)
                 writer.add_scalar('pos loss', l_pos.item(), epoch*total_step+i)
                 writer.add_scalar('conf_loss', l_conf.item(), epoch*total_step+i)
+                writer.add_scalar('disc_loss', l_disc.item(), epoch*total_step+i)
                 writer.add_scalar('pixel_wise bias', bias_acc.value, epoch*total_step+i)
         bias_acc._reset()
         scheduler.step()
