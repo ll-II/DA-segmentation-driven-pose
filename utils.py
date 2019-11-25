@@ -351,6 +351,17 @@ def transform_pred_pose(pred_dir, object_names, transformations):
             np.savetxt(f, pred_rt)
     return
 
+
+"""
+remove samples from target domains
+
+input:  a tensor of dim B x D1 x D2 x ... ,  where B is the total batch size
+output: a tensor of dim S x D1 x D2 x ... , where S is the number of source samples
+"""
+def source_only(tensor, domains):
+    source_idx = torch.nonzero(domains == 0)
+    return torch.squeeze(tensor[source_idx], 1)
+
 def get_bbox(label):
     border_list = [-1, 40, 80, 120, 160, 200, 240, 280, 320, 360, 400, 440, 480, 520, 560, 600, 640, 680]
     img_width = 480

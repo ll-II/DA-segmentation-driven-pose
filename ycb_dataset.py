@@ -165,7 +165,7 @@ class YCB_Dataset(torch.utils.data.Dataset):
         return (torch.from_numpy(combined_img.transpose(2, 0, 1)).float().div(255.0), torch.from_numpy(seg_label).long(),
                 torch.from_numpy(kp_gt_map_x).float(),  torch.from_numpy(kp_gt_map_y).float(),
                 torch.from_numpy(mask_front[:,:,0]).float(),
-                1)
+                torch.ones(self.target_w, self.target_h).long())
 
     def gen_balancing_weight(self, save_pkl="data/balancing_weight.pkl"):
         # get pixel-wise balancing weight for cross entropy loss
@@ -242,8 +242,6 @@ class YCB_Dataset(torch.utils.data.Dataset):
             with open(in_pkl, 'rb') as f:
                 bb8_2d = pickle.load(f)
 
-            print("DEBUG dataset: class_ids: ", class_ids)
-            exit(0)
             for i, cid in enumerate(class_ids):
                 class_mask = np.where(label_img == cid[0])
                 kp_gt_map_x[class_mask] = bb8_2d[:,:,0][i]
@@ -255,7 +253,7 @@ class YCB_Dataset(torch.utils.data.Dataset):
                     torch.from_numpy(label_img).long(),
                     torch.from_numpy(kp_gt_map_x).float(), torch.from_numpy(kp_gt_map_y).float(),
                     torch.from_numpy(mask_front).float(),
-                    0)
+                    torch.zeros(self.target_w, self.target_h).long())
 
     def __len__(self):
         if self.use_real_img:

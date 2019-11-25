@@ -26,21 +26,28 @@ class SegPoseNet(nn.Module):
         self.discLayer = Discriminator()
         self.training = False
 
-    def forward(self, x, y = None):
-        if self.training:
-            outlayers = self.coreModel(x)
-            out1 = self.segLayer(outlayers[0])
-            out2 = self.regLayer(outlayers[1])
-            out3 = self.discLayer(outlayers[2])
-            out_preds = [out1, out2, out3]
-            return out_preds
+    def forward(self, x, y = None, adapt = False, domains = None):
+        outlayers = self.coreModel(x)
+
+        if self.training and adapt:
+#            print("DEBUG segpose net: seg before source only", outlayers[0].size())
+            in1 = source_only(outlayers[0], domains)
+            in2 = source_only(outlayers[1], domains)
+#            print("DEBUG segpose net: seg before source only", in1.size())
         else:
-            outlayers = self.coreModel(x)
-            out1 = self.segLayer(outlayers[0])
-            out2 = self.regLayer(outlayers[1])
-            out3 = self.discLayer(outlayers[2])
-            out_preds = [out1, out2, out3]
-            return out_preds
+            in1 = outlayers[0]
+            in2 = outlayers[1]
+
+        out3 = self.discLayer(outlayers[2])
+
+        if adapt and in1.size(0) == 0:
+            out1, out2 = None, None
+        else:
+            out1 = self.segLayer(in1)
+            out2 = self.regLayer(in2)
+
+        out_preds = [out1, out2, out3]
+        return out_preds
 
     def train(self):
         self.coreModel.train()

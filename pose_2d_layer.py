@@ -10,7 +10,7 @@ class Pose2DLayer(nn.Module):
         self.keypoints = self.keypoints[:,:self.num_keypoints,:]
         self.training = False
 
-    def forward(self, output, target=None, param = None):
+    def forward(self, output, target=None, param = None, adapt=False):
         seen = 0
         if param:
             seen = param[0]

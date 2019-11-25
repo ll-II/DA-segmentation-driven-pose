@@ -2,7 +2,7 @@
 import os
 use_gpu = True
 if use_gpu:
-    cuda_visible="1,2,3"
+    cuda_visible="0"
     #gpu_id=[int(n) for n in cuda_visible.split(',')]
     gpu_id = range(len(cuda_visible.split(',')))
     os.environ['CUDA_VISIBLE_DEVICES'] = cuda_visible
@@ -49,7 +49,7 @@ def network_grad_ratio(model):
 # choose dataset/env/exp info
 dataset = 'YCB-Video'
 test_env = 'pomini'
-exp_id = 'syn_train_4'
+exp_id = 'adapt_train_0'
 print(exp_id, test_env)
 
 
@@ -73,42 +73,32 @@ syn_data_path = opj(ycb_root,"data_syn")
 kp_path = "./data/YCB-Video/YCB_bbox.npy"
 weight_path = lambda epoch: "./model/exp" + exp_id + "-" + str(epoch) + ".pth"
 #load_weight_from_path = None
-load_weight_from_path = "./model/expsyn_train_4x-19.pth"
+load_weight_from_path = "./official_weights/before_DA"
 
-"""
 # Device configuration
-if test_env == 'sjtu':
-    cuda_visible = "0,1,2,3"
-    gpu_id = [0, 1, 2, 3]
-    batch_size = 32
-    num_workers = 10
-    use_real_img = True
-    num_syn_img = 0
-    bg_path = "/media/data_2/VOCdevkit/VOC2012/JPEGImages"
-"""
-
 if test_env == 'pomini':
 #    cuda_visible = "1"
 #    gpu_id = [1]
-    batch_size = 10
+    batch_size = 1
     num_workers = 2
-    use_real_img = False
+    use_real_img = True
     syn_range = 70000
-    num_syn_img = 50000
+    num_syn_img = 180000
     save_interval = 1
     use_bg_img = False
+    adapt = True
     bg_path = "/cvlabdata1/cvlab/datasets_pomini/PASCAL3D+_release1.1/PASCAL/VOCdevkit/VOC2012/JPEGImages"
 
 #device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Hyper-parameters
 #initial_lr = 0.001
-initial_lr = 0.0001
+initial_lr = 0.001
 momentum = 0.9
 weight_decay = 5e-4
 num_epoch = 10
 #num_epoch = 1000
-#use_gpu = True
+#use_gpu = False
 gen_kp_gt = False
 number_point = 8
 modulating_factor = 1.0
@@ -124,6 +114,15 @@ else:
 def train(data_cfg):
     data_options = read_data_cfg(data_cfg)
     m = SegPoseNet(data_options)
+
+    # partial update of weights (if network structure changes)
+#    tmp_weights = torch.load(load_weight_from_path)
+#    tmp_state = m.coreModel.state_dict()
+#    tmp_state.update(tmp_weights)
+#    torch.save(tmp_state, './official_weights/before_DA')
+#    print(tmp_state.keys())
+#    exit()
+
     if load_weight_from_path is not None:
         m.load_weights(load_weight_from_path)
         print("Load weights from ", load_weight_from_path)
@@ -131,7 +130,7 @@ def train(data_cfg):
     i_w = m.width
     o_h = m.output_h
     o_w = m.output_w
-    # m.print_network()
+    m.print_network()
     m.train()
     bias_acc = meters()
     optimizer = torch.optim.SGD(m.parameters(), lr=initial_lr, momentum=momentum, weight_decay=weight_decay)
@@ -184,14 +183,19 @@ def train(data_cfg):
     total_step = len(train_loader)
     for epoch in range(num_epoch):
         i=-1
-        for images, seg_label, kp_gt_x, kp_gt_y, mask_front, domains in tqdm(train_loader): # TODO add variable 'domains'
+        for images, seg_label, kp_gt_x, kp_gt_y, mask_front, domains in tqdm(train_loader):
             i += 1
+
+
+
+#            print("DEBUG train.py: seg_label shape: ", seg_label.size(), "domains shape: ", domains.size())
             if use_gpu:
                 images = images.cuda()
                 seg_label = seg_label.cuda()
                 kp_gt_x = kp_gt_x.cuda()
                 kp_gt_y = kp_gt_y.cuda()
                 mask_front = mask_front.cuda()
+                domains = domains.cuda()
 
             #print("DEBUG train.py, gt_x = ", kp_gt_x.size(), " , gt_y = ", kp_gt_y.size())
             #for x in range(76):
@@ -200,38 +204,58 @@ def train(data_cfg):
                     #print("X: ", x, "Y: ", y)
                     #print(kp_gt_x[:, x, y, :])
 
+            d = domains[:, 0, 0].view(-1)
+            zero_source = d.bool().all()
+            domains = domains.view(-1)
+
             # forward pass
-            output = m(images)
-
-            # segmentation
-            pred_seg = output[0] # (BxOHxOW,C)
-            seg_label = seg_label.view(-1)
-            l_seg = seg_loss(pred_seg, seg_label)
-
-            # regression
-            mask_front = mask_front.repeat(number_point,1, 1, 1).permute(1,2,3,0).contiguous() # (B,OH,OW,NV)
-            pred_x = output[1][0] * mask_front # (B,OH,OW,NV)
-            pred_y = output[1][1] * mask_front
-            kp_gt_x = kp_gt_x.float() * mask_front
-            kp_gt_y = kp_gt_y.float() * mask_front
-            l_pos = pos_loss(pred_x, kp_gt_x) + pos_loss(pred_y, kp_gt_y)
-
-            # confidence
-            conf = output[1][2] * mask_front # (B,OH,OW,NV)
-            bias = torch.sqrt((pred_y-kp_gt_y)**2 + (pred_x-kp_gt_x)**2)
-            conf_target = torch.exp(-modulating_factor * bias) * mask_front
-            conf_target = conf_target.detach()
-            l_conf = conf_loss(conf, conf_target)
+            output = m(images, adapt=adapt, domains=d)
 
             # discriminator
-
-            pred_domains = output[3]
-            print("DEBUG train.py: pred_domains = ", pred_domains, "\ndomains = ", domains)
-            exit(0)
+            pred_domains = output[2]
+ #           print("DEBUG train.py: pred domains shape: ", pred_domains.size(), "domains final shape: ", domains.size())
             l_disc = disc_loss(pred_domains, domains)
 
-            # combine all losses
-            all_loss = l_seg * seg_loss_factor + l_pos * pos_loss_factor + l_conf * conf_loss_factor + l_disc * disc_loss_factor
+            # if adapt=True, compute the other losses only if there is at least one source sample
+            if adapt and zero_source:
+  #              print("DEBUG train.py: no source samples.")
+                all_loss = l_disc * disc_loss_factor
+            else:
+  #              print("DEBUG seg label shape: ", seg_label.size())
+                if adapt:
+                    seg_label = source_only(seg_label, d)
+  #              print("DEBUG seg label shape after source only: ", seg_label.size())
+
+                # segmentation
+                pred_seg = output[0] # (BxOHxOW,C)
+                seg_label = seg_label.view(-1)
+    #            print("DEBUG train pred_seg after source only:", pred_seg.size())
+                l_seg = seg_loss(pred_seg, seg_label)
+
+   #             print("DEBUG train. seg shape:", pred_seg.size(), "seg label shape: ", seg_label.size())
+
+                # regression
+                mask_front = mask_front.repeat(number_point,1, 1, 1).permute(1,2,3,0).contiguous() # (B,OH,OW,NV)
+                if adapt:
+                    mask_front = source_only(mask_front, d)
+                    kp_gt_x = source_only(kp_gt_x, d)
+                    kp_gt_y = source_only(kp_gt_y, d)
+                pred_x = output[1][0] * mask_front # (B,OH,OW,NV)
+                pred_y = output[1][1] * mask_front
+                kp_gt_x = kp_gt_x.float() * mask_front
+                kp_gt_y = kp_gt_y.float() * mask_front
+                l_pos = pos_loss(pred_x, kp_gt_x) + pos_loss(pred_y, kp_gt_y)
+
+                # confidence
+                conf = output[1][2] * mask_front # (B,OH,OW,NV)
+                bias = torch.sqrt((pred_y-kp_gt_y)**2 + (pred_x-kp_gt_x)**2)
+                conf_target = torch.exp(-modulating_factor * bias) * mask_front
+                conf_target = conf_target.detach()
+                l_conf = conf_loss(conf, conf_target)
+
+                # combine all losses
+                all_loss = l_seg * seg_loss_factor + l_pos * pos_loss_factor + l_conf * conf_loss_factor + l_disc * disc_loss_factor
+
             optimizer.zero_grad()
             all_loss.backward()
             optimizer.step()
@@ -241,13 +265,13 @@ def train(data_cfg):
             print('avg gradiant ratio: %f, %f, %f' % (avggrad, avgdata, avggrad/avgdata))
 
 
-            if (i + 1) % 20 == 0:
+            if (i + 1) % 20 == 0 and not zero_source:
                 # compute pixel-wise bias to measure training accuracy
                 bias_acc.update(abs(pnz((pred_x - kp_gt_x).cpu()).mean()*i_w))
-                print('Epoch [{}/{}], Step [{}/{}]: \n seg loss: {:.4f}, pos loss: {:.4f}, conf loss: {:.4f}, '
+                print('Epoch [{}/{}], Step [{}/{}]: \n seg loss: {:.4f}, pos loss: {:.4f}, conf loss: {:.4f}, disc loss: {:.4f} '
                       'Pixel-wise bias:{:.4f}'
                       .format(epoch + 1, num_epoch, i + 1, total_step, l_seg.item(), l_pos.item(),
-                              l_conf.item(), bias_acc.value))
+                              l_conf.item(), l_disc.item(), bias_acc.value))
 
                 writer.add_scalar('seg_loss', l_seg.item(), epoch*total_step+i)
                 writer.add_scalar('pos loss', l_pos.item(), epoch*total_step+i)
@@ -261,6 +285,7 @@ def train(data_cfg):
         if (epoch+1) % save_interval == 0:
             print("save weights to: ", weight_path(epoch))
             m.module.save_weights(weight_path(epoch))
+        exit(0)
 
     m.module.save_weights(weight_path(epoch))
     writer.close()
@@ -276,3 +301,5 @@ if __name__ == '__main__':
         train('./data/data-YCB.cfg')
     else:
         print('unsupported dataset \'%s\'.' % dataset)
+
+
