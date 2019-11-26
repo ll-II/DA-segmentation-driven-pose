@@ -2,7 +2,7 @@
 import os
 use_gpu = True
 if use_gpu:
-    cuda_visible="0"
+    cuda_visible="1,2"
     #gpu_id=[int(n) for n in cuda_visible.split(',')]
     gpu_id = range(len(cuda_visible.split(',')))
     os.environ['CUDA_VISIBLE_DEVICES'] = cuda_visible
@@ -72,15 +72,15 @@ ycb_data_path = opj(ycb_root, "data")
 syn_data_path = opj(ycb_root,"data_syn")
 kp_path = "./data/YCB-Video/YCB_bbox.npy"
 weight_path = lambda epoch: "./model/exp" + exp_id + "-" + str(epoch) + ".pth"
-#load_weight_from_path = None
-load_weight_from_path = "./official_weights/before_DA"
+load_weight_from_path = None
+#load_weight_from_path = "./model/expadapt_train_0-0.pth"
 
 # Device configuration
 if test_env == 'pomini':
 #    cuda_visible = "1"
 #    gpu_id = [1]
-    batch_size = 1
-    num_workers = 2
+    batch_size = 20
+    num_workers = 5
     use_real_img = True
     syn_range = 70000
     num_syn_img = 180000
@@ -96,7 +96,7 @@ if test_env == 'pomini':
 initial_lr = 0.001
 momentum = 0.9
 weight_decay = 5e-4
-num_epoch = 10
+num_epoch = 20
 #num_epoch = 1000
 #use_gpu = False
 gen_kp_gt = False
@@ -285,7 +285,6 @@ def train(data_cfg):
         if (epoch+1) % save_interval == 0:
             print("save weights to: ", weight_path(epoch))
             m.module.save_weights(weight_path(epoch))
-        exit(0)
 
     m.module.save_weights(weight_path(epoch))
     writer.close()

@@ -159,6 +159,12 @@ def print_cfg(blocks, width, height, channels):
             out_widths.append(1)
             out_heights.append(1)
             out_filters.append(prev_filters)
+        elif block['type'] == 'gradient_reversal':
+            scale = float(block['scale'])
+            print('%5d %-6s   scale = %.2f' % (ind, 'gradient reversal', scale))
+            out_widths.append(prev_width)
+            out_heights.append(prev_height)
+            out_filters.append(prev_filters)
         else:
             print('unknown type %s' % (block['type']))
 
