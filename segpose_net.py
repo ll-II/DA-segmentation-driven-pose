@@ -30,10 +30,10 @@ class SegPoseNet(nn.Module):
         outlayers = self.coreModel(x)
 
         if self.training and adapt:
-#            print("DEBUG segpose net: seg before source only", outlayers[0].size())
+            #print("DEBUG segpose net: seg before source only", outlayers[0].size(), 'domains=', domains, flush=True)
             in1 = source_only(outlayers[0], domains)
             in2 = source_only(outlayers[1], domains)
-#            print("DEBUG segpose net: seg before source only", in1.size())
+            #print("DEBUG segpose net: seg before source only", in1.size(), flush=True)
         else:
             in1 = outlayers[0]
             in2 = outlayers[1]
@@ -41,10 +41,12 @@ class SegPoseNet(nn.Module):
         out3 = self.discLayer(outlayers[2])
 
         if adapt and in1.size(0) == 0:
-            out1, out2 = None, None
-        else:
-            out1 = self.segLayer(in1)
-            out2 = self.regLayer(in2)
+            print("BUG segpose.py: domains = ", domains)
+#           in1 = in1.detach()
+#           in2 = in2.detach()
+#        else:
+        out1 = self.segLayer(in1)
+        out2 = self.regLayer(in2)
 
         out_preds = [out1, out2, out3]
         return out_preds

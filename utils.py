@@ -185,7 +185,7 @@ def do_detect(model, rawimg, intrinsics, bestCnt, conf_thresh, use_gpu=False, se
 
 def fusion(output, width, height, intrinsics, conf_thresh, batchIdx, bestCnt, rawimg, seg_save_path):
     layerCnt = len(output)
-    assert(layerCnt == 2)
+    assert(layerCnt >= 2)
 
     inlierImg = np.copy(rawimg)
 
@@ -200,6 +200,7 @@ def fusion(output, width, height, intrinsics, conf_thresh, batchIdx, bestCnt, ra
     nC = cls_ids.max() + 1
 
     outPred = []
+    p2d = None
 
     mx = predx.mean(axis=2) # average x positions
     my = predy.mean(axis=2) # average y positions

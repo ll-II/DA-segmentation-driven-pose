@@ -19,18 +19,16 @@ class Discriminator(nn.Module):
         self.soft = nn.Softmax(dim=0)
 
     def forward(self, output, param = None):
-
+        # TODO transformtions ?
+        n_cells = output.size(2) * output.size(3)
+        n_domains = output.size(1)
+        batch_size = output.size(0)
+#       print("DEBUG disc: batch: ", batch_size, "n cells:", n_cells, "n_domins", n_domains, "output shape before: ", output.size())
+        output = output.permute(0, 2, 3, 1).contiguous().view(batch_size * n_cells, n_domains)
         if self.training:
-
-            # TODO transformtions ?
-            n_cells = output.size(2) * output.size(3)
-            n_domains = output.size(1)
-            batch_size = output.size(0)
-#            print("DEBUG disc: batch: ", batch_size, "n cells:", n_cells, "n_domins", n_domains, "output shape before: ", output.size())
-            output = output.permute(0, 2, 3, 1).contiguous().view(batch_size * n_cells, n_domains)
             return output
         else:
-            cls_confs, cls_ids = torch.max(F.softmax(cls, 1), 1)
+            cls_confs, cls_ids = torch.max(F.softmax(output, 1), 1)
 
             # TODO need to reshape confs and ids?
             cls_confs = convert2cpu(cls_confs).detach().numpy()

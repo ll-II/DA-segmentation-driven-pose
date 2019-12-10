@@ -1,5 +1,5 @@
 import os
-gpu_id = '3'
+gpu_id = '2'
 os.environ['CUDA_VISIBLE_DEVICES'] = gpu_id
 from utils import *
 from segpose_net import SegPoseNet
@@ -55,12 +55,12 @@ def evaluate(data_cfg, weightfile, listfile, outdir, object_names, intrinsics, v
 
 if __name__ == '__main__':
     use_gpu = True
-    #use_gpu = False
+#    use_gpu = False
     # #
 
     dataset = 'YCB-Video'
-    outdir = './exp-syn-train-4x-17'
-
+    outdir = './exp_DA_BG_GRe-1-8'
+    #outdir = './exp_junk'
     # dataset = 'our-YCB-Video'
     # outdir = './our-YCB-result'
 
@@ -77,8 +77,9 @@ if __name__ == '__main__':
         vertex_ycbvideo = np.load('./data/YCB-Video/YCB_vertex.npy')
         evaluate('./data/data-YCB.cfg',
                             #'../others/SegPose/weights_before_DA/yinlin_old_30.pth',
-                            './model/expsyn_train_4x-17.pth',
-                            '/cvlabdata1/cvlab/datasets_pomini/YCB_Video_Dataset/YCB_Video_Dataset/syn_val_100.txt',
+                            #'./official_weights/before_DA_BG.pth',
+                            './model/expDA_BG_gr1e-1-8.pth',
+                            '/cvlabdata1/cvlab/datasets_pomini/YCB_Video_Dataset/YCB_Video_Dataset/val_100.txt',
                              #'./ycb-video-testlist.txt',
                              outdir, object_names_ycbvideo, k_ycbvideo, vertex_ycbvideo,
                              bestCnt=10, conf_thresh=0.3, use_gpu=use_gpu)
@@ -99,6 +100,6 @@ if __name__ == '__main__':
                              './model/ycb-video.pth',
                              './our-ycb-testlist.txt',
                              outdir, object_names_ycbvideo, k_ycbvideo, vertex_ycbvideo,
-                             bestCnt=10, conf_thresh=0.8, use_gpu=use_gpu)
+                             bestCnt=10, conf_thresh=0.0, use_gpu=use_gpu)
     else:
         print('unsupported dataset \'%s\'.' % dataset)

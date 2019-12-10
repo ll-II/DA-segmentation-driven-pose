@@ -24,6 +24,13 @@ class Pose2DLayer(nn.Module):
         nH = output.data.size(2)
         nW = output.data.size(3)
 
+#        if nB == 0:
+#             return output.view(0, nH, nW, nV)
+#            print("DEBUG pose2d, NB = 0")
+#            empty = Variable(torch.empty([]).view(nB, nH, nW, nV), require_grad = False)
+#            with torch.no_grad():
+#                empty = torch.zeros(0,nH,nW,nV).cuda()
+#                return [empty, empty, empty]
         output = output.view(nB * nA, (3 * nV), nH * nW).transpose(0, 1). \
             contiguous().view((3 * nV), nB * nA * nH * nW)
 

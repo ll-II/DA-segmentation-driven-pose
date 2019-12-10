@@ -18,7 +18,7 @@ opj = os.path.join
 class YCB_Dataset(torch.utils.data.Dataset):
     def __init__(self, root, imageset_path, syn_data_path=None, use_real_img = True, syn_range=70000, num_syn_images=70000 ,target_h=76, target_w=76
                  , bg_path = None, kp_path="data/YCB-Video/YCB_bbox.npy", data_cfg="data/data-YCB.cfg",
-                 use_bg_img = True):
+                 use_bg_img = True, one_syn_per_batch = False, batch_size = None):
         self.root = root
         data_options = read_data_cfg(data_cfg)
         self.input_width = int(data_options['width']) # 608, width of CNN input
@@ -53,6 +53,11 @@ class YCB_Dataset(torch.utils.data.Dataset):
 
         self.kp3d = np.load(kp_path)
         self.n_kp = 8
+
+        self.counter = -1
+        self.one_syn_per_batch = one_syn_per_batch
+        self.batch_size = batch_size
+
 
     def gen_train_list(self, imageset_path, out_pkl="data/real_train_path.pkl"):
         with open(opj(imageset_path, "trainval.txt"), 'r') as file:
@@ -216,11 +221,17 @@ class YCB_Dataset(torch.utils.data.Dataset):
         self.weight_cross_entropy =  torch.from_numpy(np.array(weight)).float()
 
     def __getitem__(self, index):
+        self.counter += 1
         if not self.use_real_img:
             return self.gen_synthetic()
         if index > len(self.train_paths) - 1:
             return self.gen_synthetic()
+        # for DA, enforces that each batch has at least one source sample
+        if self.one_syn_per_batch and self.counter % self.batch_size == 0:
+            return self.gen_synthetic()
         else:
+#            print("debug ycb_dataset: gen target image")
+
             prefix = self.train_paths[index]
             # get raw image
             raw = cv2.imread(prefix + "-color.png")
@@ -253,7 +264,7 @@ class YCB_Dataset(torch.utils.data.Dataset):
                     torch.from_numpy(label_img).long(),
                     torch.from_numpy(kp_gt_map_x).float(), torch.from_numpy(kp_gt_map_y).float(),
                     torch.from_numpy(mask_front).float(),
-                    torch.ones(self.target_w, self.target_h).long())
+                    torch.ones(self.target_w, self.target_h).long()  )
 
     def __len__(self):
         if self.use_real_img:
