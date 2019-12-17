@@ -39,6 +39,8 @@ class SegPoseNet(nn.Module):
             in2 = outlayers[1]
 
         out3 = self.discLayer(outlayers[2])
+        out4 = outlayers[3]
+        out5 = outlayers[4]
 
         if adapt and in1.size(0) == 0:
             print("BUG segpose.py: domains = ", domains)
@@ -48,7 +50,7 @@ class SegPoseNet(nn.Module):
         out1 = self.segLayer(in1)
         out2 = self.regLayer(in2)
 
-        out_preds = [out1, out2, out3]
+        out_preds = [out1, out2, out3, out4, out5]
         return out_preds
 
     def train(self):

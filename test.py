@@ -1,5 +1,5 @@
 import os
-gpu_id = '2'
+gpu_id = '3'
 os.environ['CUDA_VISIBLE_DEVICES'] = gpu_id
 from utils import *
 from segpose_net import SegPoseNet
@@ -59,7 +59,7 @@ if __name__ == '__main__':
     # #
 
     dataset = 'YCB-Video'
-    outdir = './exp_DA_BG_GRe-1-8'
+    outdir = './exp_DA_BG_2disc_6'
     #outdir = './exp_junk'
     # dataset = 'our-YCB-Video'
     # outdir = './our-YCB-result'
@@ -78,7 +78,7 @@ if __name__ == '__main__':
         evaluate('./data/data-YCB.cfg',
                             #'../others/SegPose/weights_before_DA/yinlin_old_30.pth',
                             #'./official_weights/before_DA_BG.pth',
-                            './model/expDA_BG_gr1e-1-8.pth',
+                            './model/expDA_2_disc005-21.pth',
                             '/cvlabdata1/cvlab/datasets_pomini/YCB_Video_Dataset/YCB_Video_Dataset/val_100.txt',
                              #'./ycb-video-testlist.txt',
                              outdir, object_names_ycbvideo, k_ycbvideo, vertex_ycbvideo,

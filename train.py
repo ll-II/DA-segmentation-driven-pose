@@ -2,7 +2,7 @@ import os
 use_gpu = True
 ngpu = 0
 if use_gpu:
-    cuda_visible="0,1"
+    cuda_visible="1,2"
     #gpu_id=[int(n) for n in cuda_visible.split(',')]
     gpu_id = range(len(cuda_visible.split(',')))
     ngpu = len(gpu_id)
@@ -50,7 +50,7 @@ def network_grad_ratio(model):
 # choose dataset/env/exp info
 dataset = 'YCB-Video'
 test_env = 'pomini'
-exp_id = 'DA_BG_gr1e-1'
+exp_id = 'DA_2_disc005'
 #exp_id = 'debug'
 print(exp_id, test_env)
 
@@ -75,13 +75,15 @@ syn_data_path = opj(ycb_root,"data_syn")
 kp_path = "./data/YCB-Video/YCB_bbox.npy"
 weight_path = lambda epoch: "./model/exp" + exp_id + "-" + str(epoch) + ".pth"
 #load_weight_from_path = None
-load_weight_from_path = "./official_weights/before_DA_BG.pth"
+#load_weight_from_path = "./official_weights/before_DA_BG.pth"
+load_weight_from_path = "./official_weights/before_DA_BG-2disc.pth"
 #load_weight_from_path = "./model/expDA_with_bg_no_freeze_1-0.pth"
 
 # Device configuration
 if test_env == 'pomini':
 #    cuda_visible = "1"
 #    gpu_id = [1]
+    #batch_size = 18
     batch_size = 18
     num_workers = 4
     use_real_img = True
@@ -155,14 +157,14 @@ def train(data_cfg):
     m = SegPoseNet(data_options)
 
     # partial update of weights (if network structure changes)
-    #tmp_weights = torch.load(load_weight_from_path)
-    #tmp_state = m.coreModel.state_dict()
-    #for layer_i in range(126, 140):
-    #    tmp_weights = {k: v for k, v in tmp_weights.items() if k in tmp_state and not "models."+str(layer_i) in k}
-    #tmp_state.update(tmp_weights)
-    #torch.save(tmp_state, './official_weights/before_DA_BG.pth')
-    #print(tmp_state.keys())
-    #exit()
+#    tmp_weights = torch.load(load_weight_from_path)
+#    tmp_state = m.coreModel.state_dict()
+#    for layer_i in range(126, 200):
+#        tmp_weights = {k: v for k, v in tmp_weights.items() if k in tmp_state and not "models."+str(layer_i) in k}
+#    tmp_state.update(tmp_weights)
+#    torch.save(tmp_state, './official_weights/before_DA_BG-2disc.pth')
+#    print(tmp_state.keys())
+#    exit()
 
     if load_weight_from_path is not None:
         m.load_weights(load_weight_from_path)
@@ -218,6 +220,12 @@ def train(data_cfg):
     disc_loss = nn.CrossEntropyLoss()
     disc_loss_factor = 1
 
+    seg_disc_loss = nn.CrossEntropyLoss()
+    seg_disc_loss_factor = 1
+
+    pos_disc_loss = nn.CrossEntropyLoss()
+    pos_disc_loss_factor = 1
+
     #pos_loss_factor, conf_loss_factor = 2.6 , 0.8
 
     # split into train and val
@@ -264,9 +272,13 @@ def train(data_cfg):
 
             # discriminator
             pred_domains = output[2]
+            seg_pred_domains = output[3]
+            pos_pred_domains = output[4]
  #           print("DEBUG train.py: pred domains shape: ", pred_domains.size(), "domains final shape: ", domains.size())
             l_disc = disc_loss(pred_domains, domains)
 
+            l_seg_disc = seg_disc_loss(seg_pred_domains, d)
+            l_pos_disc = pos_disc_loss(pos_pred_domains, d)
 
 #            print("debug d: ", d.shape, "domains: ", domains.shape, flush=True)
 
@@ -311,9 +323,9 @@ def train(data_cfg):
 
                 # combine all losses
  #               if not adapt_only:
-                all_loss = l_seg * seg_loss_factor + l_pos * pos_loss_factor + l_conf * conf_loss_factor 
+                all_loss = l_seg * seg_loss_factor + l_pos * pos_loss_factor + l_conf * conf_loss_factor
                 if adapt:
-                    all_loss += l_disc * disc_loss_factor
+                    all_loss += l_disc * disc_loss_factor + l_seg_disc * seg_disc_loss_factor + l_pos_disc * pos_disc_loss_factor
   #              else:
   #                  all_loss = l_disc * disc_loss_factor
 
@@ -331,6 +343,20 @@ def train(data_cfg):
             correct = (binary_domains == domains).float().sum()
             total = domains.size(0)
             acc = correct/total * 100
+
+            _, seg_binary_domains = torch.max(seg_pred_domains, 1)
+            n_seg_target_pred = seg_binary_domains.float().sum()
+            correct = (seg_binary_domains == d).float().sum()
+            total = d.size(0)
+            seg_disc_acc = correct/total * 100
+
+#            print("debug train: n_target_ored:", n_target_pred, "seg_binary:", seg_binary_domains, "d: ", d, "correct: ", correct, "seg_acc:", seg_disc_acc)
+
+            _, pos_binary_domains = torch.max(pos_pred_domains, 1)
+            n_pos_target_pred = pos_binary_domains.float().sum()
+            correct = (pos_binary_domains == d).float().sum()
+            total = d.size(0)
+            pos_disc_acc = correct/total * 100
 
             def set_disc(require_grad = True, first_disc_layer = 126, last_disc_layer=139):
                 for name, param in m.named_parameters():
@@ -350,20 +376,34 @@ def train(data_cfg):
                 # compute pixel-wise bias to measure training accuracy
                 bias_acc.update(abs(pnz((pred_x - kp_gt_x).cpu()).mean()*i_w))
 
-                print('Epoch [{}/{}], Step [{}/{}]: \n seg loss: {:.4f}, pos loss: {:.4f}, conf loss: {:.4f}, disc loss: {:.4f} '
-                      'Pixel-wise bias:{:.4f}, disc acc: {:.4f}, n target predictions: {:.4f}'
-                      .format(epoch + 1, num_epoch, i + 1, total_step, l_seg.item(), l_pos.item(),
-                              l_conf.item(), l_disc.item(), bias_acc.value, acc.item(), n_target_pred.item()))
+                print('Epoch [{}/{}], Step [{}/{}]: \n seg loss: {:.4f}, pos loss: {:.4f}, conf loss: {:.4f}, pixel-wise bias:{:.4f} '
+                      'disc loss: {:.4f}, disc acc: {:.4f}, n target predictions: {:.4f} '
+                      'disc seg loss: {:.4f}, disc seg acc: {:.4f}, n seg target predictions: {:.4f} '
+                      'disc pos loss: {:.4f}, disc pos acc: {:.4f}, n pos target predictions: {:.4f} '
+                      .format(epoch + 1, num_epoch, i + 1, total_step, l_seg.item(), l_pos.item(), l_conf.item(), bias_acc.value,
+                              l_disc.item(), acc.item(), n_target_pred.item(),
+                              l_seg_disc.item(), seg_disc_acc.item(), n_seg_target_pred.item(),
+                              l_pos_disc.item(), pos_disc_acc.item(), n_pos_target_pred.item()))
 
 
 
                 writer.add_scalar('seg_loss', l_seg.item(), epoch*total_step+i)
                 writer.add_scalar('pos loss', l_pos.item(), epoch*total_step+i)
                 writer.add_scalar('conf_loss', l_conf.item(), epoch*total_step+i)
-                writer.add_scalar('disc_loss', l_disc.item(), epoch*total_step+i)
                 writer.add_scalar('pixel_wise bias', bias_acc.value, epoch*total_step+i)
+
+                writer.add_scalar('disc_loss', l_disc.item(), epoch*total_step+i)
                 writer.add_scalar('disc_acc', acc.item(), epoch*total_step+i)
                 writer.add_scalar('n_target_preds', n_target_pred.item(), epoch*total_step+i)
+
+
+                writer.add_scalar('seg_disc_loss', l_seg_disc.item(), epoch*total_step+i)
+                writer.add_scalar('seg_disc_acc', seg_disc_acc.item(), epoch*total_step+i)
+                writer.add_scalar('n_seg_target_preds', n_seg_target_pred.item(), epoch*total_step+i)
+
+                writer.add_scalar('pos_disc_loss', l_pos_disc.item(), epoch*total_step+i)
+                writer.add_scalar('pos_disc_acc', pos_disc_acc.item(), epoch*total_step+i)
+                writer.add_scalar('n_pos_target_preds', n_pos_target_pred.item(), epoch*total_step+i)
 
         bias_acc._reset()
         scheduler.step()

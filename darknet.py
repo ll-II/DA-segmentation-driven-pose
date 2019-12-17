@@ -92,8 +92,14 @@ class Darknet(nn.Module):
             if block['type'] == 'net':
                 continue
             elif block['type'] in ['convolutional', 'deconvolutional', 'maxpool', 'reorg', 'upsample', 'avgpool', 'softmax', 'connected', 'gradient_reversal']:
+
+#                if block['type'] == 'connected':
+#                    print(x.size(), flush=True)
+#                    print(x.flatten(start_dim=1, end_dim=-1).size(), flush=True)
+
                 x = self.models[ind](x)
                 outputs[ind] = x
+
             elif block['type'] == 'route':
                 layers = block['layers'].split(',')
                 layers = [int(i) if int(i) > 0 else int(i)+ind for i in layers]
@@ -246,16 +252,21 @@ class Darknet(nn.Module):
                 out_strides.append(prev_stride)
                 models.append(EmptyModule())
             elif block['type'] == 'connected':
+                prev_input = int(block['input'])
                 filters = int(block['output'])
                 if block['activation'] == 'linear':
-                    model = nn.Linear(prev_filters, filters)
+                    model = nn.Sequential(
+                               nn.Flatten(),
+                               nn.Linear(prev_input, filters))
                 elif block['activation'] == 'leaky':
                     model = nn.Sequential(
-                               nn.Linear(prev_filters, filters),
+                               nn.Flatten(),
+                               nn.Linear(prev_input, filters),
                                nn.LeakyReLU(0.1, inplace=True))
                 elif block['activation'] == 'relu':
                     model = nn.Sequential(
-                               nn.Linear(prev_filters, filters),
+                               nn.Flatten(),
+                               nn.Linear(prev_input, filters),
                                nn.ReLU(inplace=True))
                 prev_filters = filters
                 out_filters.append(prev_filters)

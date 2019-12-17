@@ -16,7 +16,6 @@ class Discriminator(nn.Module):
     """
     def __init__(self):
         super(Discriminator, self).__init__()
-        self.soft = nn.Softmax(dim=0)
 
     def forward(self, output, param = None):
         # TODO transformtions ?
