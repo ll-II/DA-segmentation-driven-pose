@@ -20,7 +20,7 @@ class SegPoseNet(nn.Module):
         self.output_h = 76
         self.output_w = 76
 
-        self.coreModel = Darknet(pose_arch_cfg, self.width, self.height, self.channels)
+        self.coreModel = Darknet(pose_arch_cfg, self.width, self.height, self.channels, self.domains)
         self.segLayer = PoseSegLayer(data_options)
         self.regLayer = Pose2DLayer(data_options)
         self.discLayer = Discriminator()

@@ -72,7 +72,7 @@ class EmptyModule(nn.Module):
 
 # support route shortcut and reorg
 class Darknet(nn.Module):
-    def __init__(self, cfgfile, width, height, channels):
+    def __init__(self, cfgfile, width, height, channels, domains):
         super(Darknet, self).__init__()
         self.width = width
         self.height = height
@@ -81,7 +81,19 @@ class Darknet(nn.Module):
         self.blocks = parse_cfg(cfgfile)
         self.models = self.create_network(self.blocks) # merge conv,bn,leaky
 
+        # the total number of training samples (initialized in train.py),
+        # and the current number of samples seen,
+        # need to keep track of the progress for the multiflow units (refer to the paper)
+        self.total_training_samples = None
+        self.seen = None
+
+        # number of domains (2 in our case)
+        self.domains = domains
+
     def forward(self, x, y = None):
+
+        print("debug darknet: seen += ", x.size(0))
+        self.seen += x.size(0)
         ind = -1
         outputs = dict()
         desiredOutputIdx = []
@@ -91,6 +103,12 @@ class Darknet(nn.Module):
             #    return x
             if block['type'] == 'net':
                 continue
+
+            elif block['type'] == 'multiflow':
+                param = {'progress': min(self.seen/self.total_training_samples, 1)}
+                x = self.models[ind](x, param=param)
+                outputs[ind] = x
+
             elif block['type'] in ['convolutional', 'deconvolutional', 'maxpool', 'reorg', 'upsample', 'avgpool', 'softmax', 'connected', 'gradient_reversal']:
 
 #                if block['type'] == 'connected':
@@ -147,8 +165,27 @@ class Darknet(nn.Module):
         out_strides = []
         conv_id = 0
         deconv_id = 0
+
+        inside_multiflow = False
+        n_multiflow_streams = 0
+        multiflow_size = None
+        multiflow_list = []
+        multiflow_index = 0
+
         for block in blocks:
-            if block['type'] in ['convolutional', 'deconvolutional']:
+
+            # add multiflow block. for now, only supports convolutions and deconvolutions.
+            if block['type'] == 'multiflow':
+                inside_multiflow = True
+                multiflow_size = int(block['n_layers'])
+                n_multiflow_streams = int(block['n_streams'])
+                multiflow_list = []
+                multiflow_index = 0
+
+                out_filters.append(prev_filters)
+                out_strides.append(prev_stride)
+
+            elif block['type'] in ['convolutional', 'deconvolutional']:
                 batch_normalize = int(block['batch_normalize'])
                 filters = int(block['filters'])
                 kernel_size = int(block['size'])
@@ -184,7 +221,28 @@ class Darknet(nn.Module):
                 out_filters.append(prev_filters)
                 prev_stride = stride * prev_stride
                 out_strides.append(prev_stride)
-                models.append(model)
+
+                # multiflow
+                if inside_multiflow:
+                    multiflow_list.append(model)
+                    multiflow_index += 1
+
+                    # end of multiflow block.   PERS NOTE: may move the 6 ligns below at the beginning of the loop
+                    if multiflow_index == multiflow_size:
+                        multiflow_model = nn.Sequential(*multiflow_list)
+                        print("debug multiflow module paraam: ", multiflow_model.state_dict().keys())
+                        multiflow_unit = MultiflowUnit(multiflow_model, self.domains, n_multiflow_streams)
+                        models.append(multiflow_unit)
+                        print("debug multiflow unit param: ", multiflow_unit.state_dict().keys())
+                        inside_multiflow = False
+
+                        # add empty modules for each skipped block, for index consistency
+                        for i in range(multiflow_size):
+                            models.append(EmptyModule())
+
+                else:
+                    models.append(model)
+
             elif block['type'] == 'maxpool':
                 pool_size = int(block['size'])
                 stride = int(block['stride'])

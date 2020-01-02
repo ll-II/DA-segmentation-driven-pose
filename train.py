@@ -112,6 +112,9 @@ gen_kp_gt = False
 number_point = 8
 modulating_factor = 1.0
 
+# number of samples computed previously
+seen = 0
+
 # Device configuration
 #device = torch.device('cuda' if torch.cuda.is_available() and use_gpu else 'cpu')
 # summary writer
@@ -121,9 +124,9 @@ else:
     writer = SummaryWriter(logdir='./log' + exp_id, comment='training log')
 
 #########
-
 from collections import OrderedDict
 import copy
+
 # helper to adapt weights when adding new layers
 def update_weights_new_reversal(new_name = "./official_weights/before_DA.pth", reversal_indexes = [125, 133, 134, 140, 141]):
     result = OrderedDict()
@@ -148,6 +151,50 @@ def update_weights_new_reversal(new_name = "./official_weights/before_DA.pth", r
         print(k, "   ->   ", new_k)
 
     torch.save(result, new_name)
+
+# helper to adapt weight_state_dict when adding multiflow
+def adapt weight_state(state_dict, multiflow_indexes):
+    result = None
+
+    # keys have format 'models.012.bn......'
+    prefix_len = len('models.')
+
+    def get_layer_nr(k):
+
+        suffix = k[prefix_len:]
+        l2 = suffix.index('.')
+        print('debug: k: ', k, 'prefix ind: ', int(suffix[:l2]))
+        return int(prefix[:l2])
+
+    def increment_key_layer(k):
+        layer = get_layer_nr(k)
+        return k.replace(str(layer), str(layer+1), 1)
+
+        # models.9.conv8.weight  -> models.9.models.i.0.conv8.weights  for i in range(...)
+
+    result = OrderedDict()
+    for multiflow_index in multiflow_indexes:
+        idx = 0
+        for k, v in state_dict.items():
+            layer = get_layer_nr(k)
+            if layer == multiflow_index:
+                print("DEBUG: k = ", k)
+                n_streams = 2
+                l = prefix_len + len(str(layer))  # 'models.9'
+                prefix = k[:l]
+                suffix = k[l:]
+
+                for stream in range(n_streams):
+                    new_k = prefix + '.models.' + str(stream) + '.' + str(idx) + suffix
+                    result[new_k] = copy.deepcopy(v)
+                    print('   -> ', new_k)
+            elif layer > multiflow_index:
+
+                print("DEBUG: k = ", k, " new_k = ", increment_key_layer(k))
+                result[increment_key_layer(k)] = copy.deepcopy(v)
+
+            idx += 1
+    return result
 
 
 #update_weights_new_reversal()
@@ -204,6 +251,13 @@ def train(data_cfg):
         else train_dataset.weight_cross_entropy
 
     print('training on %d images'%len(train_dataset))
+
+    # for multiflow, need to keep track of the training progress
+    m.coreModel.total_training_samples = seen + num_epoch * len(training_dataset)
+    print('total training samples:', m.coreModel.total_training_samples)
+    m.coreModel.seen = seen
+
+
     if gen_kp_gt:
         train_dataset.gen_kp_gt(for_syn=True, for_real=False)
 
@@ -470,5 +524,3 @@ if __name__ == '__main__':
         train('./data/data-YCB.cfg')
     else:
         print('unsupported dataset \'%s\'.' % dataset)
-
-
