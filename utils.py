@@ -116,6 +116,8 @@ def show_seg(img, output, batchIdx, width, height):
 
     nC = cls_ids.max() + 1
 
+    print("debug utils nC: ", nC)
+
     for cidx in range(nC):
         # skip background
         if cidx == 0:
@@ -267,9 +269,9 @@ def fusion(output, width, height, intrinsics, conf_thresh, batchIdx, bestCnt, ra
                 x = p2d[i][0]
                 y = p2d[i][1]
                 inlierImg = cv2.circle(inlierImg, (int(x), int(y)), 2, get_class_colors(cidx), -1)
-
+#        print("debug utils.py: p3d p2d sum non", np.isnan(p3d).sum(), np.isnan(p2d).sum())
         retval, rot, trans, inliers = cv2.solvePnPRansac(p3d, p2d, intrinsics, None, flags=cv2.SOLVEPNP_EPNP)
-
+#        print("debug utils rot trans sum nan", np.isnan(trans).sum(), np.isnan(rot).sum())
         if not retval:
             continue
 

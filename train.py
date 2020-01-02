@@ -2,7 +2,7 @@ import os
 use_gpu = True
 ngpu = 0
 if use_gpu:
-    cuda_visible="1,2"
+    cuda_visible="0,1,2"
     #gpu_id=[int(n) for n in cuda_visible.split(',')]
     gpu_id = range(len(cuda_visible.split(',')))
     ngpu = len(gpu_id)
@@ -50,7 +50,8 @@ def network_grad_ratio(model):
 # choose dataset/env/exp info
 dataset = 'YCB-Video'
 test_env = 'pomini'
-exp_id = 'DA_2_disc005'
+exp_id = 'DA_2_disc_1item_3'
+#exp_id = '1_item_BG_2'
 #exp_id = 'debug'
 print(exp_id, test_env)
 
@@ -74,22 +75,24 @@ ycb_data_path = opj(ycb_root, "data")
 syn_data_path = opj(ycb_root,"data_syn")
 kp_path = "./data/YCB-Video/YCB_bbox.npy"
 weight_path = lambda epoch: "./model/exp" + exp_id + "-" + str(epoch) + ".pth"
-#load_weight_from_path = None
+load_weight_from_path = None
 #load_weight_from_path = "./official_weights/before_DA_BG.pth"
-load_weight_from_path = "./official_weights/before_DA_BG-2disc.pth"
-#load_weight_from_path = "./model/expDA_with_bg_no_freeze_1-0.pth"
+#load_weight_from_path = "./official_weights/before_DA_BG-2disc.pth"
+#load_weight_from_path = "./model/exp1_item_BG_2-49.pth"
+load_weight_from_path = "./model/expDA_2_disc_1item_2-49.pth"
+
 
 # Device configuration
 if test_env == 'pomini':
 #    cuda_visible = "1"
 #    gpu_id = [1]
     #batch_size = 18
-    batch_size = 18
-    num_workers = 4
+    batch_size = 24
+    num_workers = 6
     use_real_img = True
-    syn_range = 70000
-    num_syn_img = 140000
-    save_interval = 1
+    syn_range = 70000 #70000
+    num_syn_img = 30000
+    save_interval = 2
     use_bg_img = True
     adapt = True
 #    adapt_only = True
@@ -98,11 +101,11 @@ if test_env == 'pomini':
 #device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Hyper-parameters
-#initial_lr = 0.001
 initial_lr = 0.0001
+#initial_lr = 0.0001
 momentum = 0.9
 weight_decay = 5e-4
-num_epoch = 30
+num_epoch = 50
 #num_epoch = 1000
 #use_gpu = False
 gen_kp_gt = False
@@ -243,7 +246,45 @@ def train(data_cfg):
         i=-1
         for images, seg_label, kp_gt_x, kp_gt_y, mask_front, domains in tqdm(train_loader):
             i += 1
+#            continue
 
+#            print("kp x size: ", kp_gt_x.size())
+ #           print("seg label: ", torch.max(seg_label), seg_label.size())
+
+            chosen_class = 2
+            class_mask = seg_label == chosen_class
+            not_class_mask = seg_label != chosen_class
+
+            kp_gt_x[not_class_mask[..., None].expand_as(kp_gt_x)] = 0
+            kp_gt_y[not_class_mask[..., None].expand_as(kp_gt_y)] = 0
+
+            seg_label[class_mask] = 1
+            seg_label[not_class_mask] = 0
+
+            # do no computations if the targeted object is not in the image
+#            if not seg_label.bool().any():
+#                print("ddebug: no object in this image: ", seg_label.sum())
+#                exit(0)
+#                continue
+
+
+#            print("test", test)
+
+            #kp_gt_x = kp_gt_x.permute(3,0,1,2)
+            #kp_gt_y = kp_gt_y.permute(3,0,1,2)
+            #print("kp x size after prmute: ", kp_gt_x.size())
+            #for i_point in range(number_point):
+            #    tmp = kp_gt_x[i_point]
+            #    print("tmp size:", tmp.size())
+            #    kp_gt_x[i_point][test] = 0
+            #    kp_gt_y[i_point][not_class_idx] = 0
+            #seg_label[class_idx] = 1
+            #seg_label[not_class_idx] = 0
+
+#            print("class index: ", class_idx, class_idx.size())
+
+ #           print("max seg label: ", torch.max(seg_label))
+ #           print("non zero points x: ", torch.nonzero(kp_gt_x != 0).size())
 
 
 #            print("DEBUG train.py: seg_label shape: ", seg_label.size(), "domains shape: ", domains.size())
@@ -284,6 +325,7 @@ def train(data_cfg):
 
             # if adapt=True, compute the other losses only if there is at least one source sample
             if adapt and zero_source:
+                 # TODO this happen with 1 gpu
                 print("BUG train.py: no source samples in one batch.")
                 #all_loss = l_disc * disc_loss_factor
                 exit(1)
@@ -381,9 +423,10 @@ def train(data_cfg):
                       'disc seg loss: {:.4f}, disc seg acc: {:.4f}, n seg target predictions: {:.4f} '
                       'disc pos loss: {:.4f}, disc pos acc: {:.4f}, n pos target predictions: {:.4f} '
                       .format(epoch + 1, num_epoch, i + 1, total_step, l_seg.item(), l_pos.item(), l_conf.item(), bias_acc.value,
-                              l_disc.item(), acc.item(), n_target_pred.item(),
-                              l_seg_disc.item(), seg_disc_acc.item(), n_seg_target_pred.item(),
-                              l_pos_disc.item(), pos_disc_acc.item(), n_pos_target_pred.item()))
+                             l_disc.item(), acc.item(), n_target_pred.item(),
+                             l_seg_disc.item(), seg_disc_acc.item(), n_seg_target_pred.item(),
+                             l_pos_disc.item(), pos_disc_acc.item(), n_pos_target_pred.item()
+                     ))
 
 
 

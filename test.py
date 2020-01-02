@@ -1,6 +1,6 @@
 import os
-gpu_id = '3'
-os.environ['CUDA_VISIBLE_DEVICES'] = gpu_id
+#gpu_id = '2'
+#os.environ['CUDA_VISIBLE_DEVICES'] = gpu_id
 from utils import *
 from segpose_net import SegPoseNet
 import cv2
@@ -54,13 +54,14 @@ def evaluate(data_cfg, weightfile, listfile, outdir, object_names, intrinsics, v
         print('%s: Visualization in %f seconds.' % (imgfile, (vis_finish - vis_start)))
 
 if __name__ == '__main__':
-    use_gpu = True
-#    use_gpu = False
+    #use_gpu = True
+    use_gpu = False
     # #
 
     dataset = 'YCB-Video'
-    outdir = './exp_DA_BG_2disc_6'
+#    outdir = './exp_1item_debug'
     #outdir = './exp_junk'
+    outdir = './exp_1_item_DA_val_3_09'
     # dataset = 'our-YCB-Video'
     # outdir = './our-YCB-result'
 
@@ -75,14 +76,22 @@ if __name__ == '__main__':
                                  '019_pitcher_base', '021_bleach_cleanser', '024_bowl', '025_mug', '035_power_drill', '036_wood_block',
                                  '037_scissors', '040_large_marker', '051_large_clamp', '052_extra_large_clamp', '061_foam_brick']
         vertex_ycbvideo = np.load('./data/YCB-Video/YCB_vertex.npy')
+
+        # code for only 1 class
+        chosen_class = 1  #19
+        vertex_ycbvideo = vertex_ycbvideo[chosen_class][np.newaxis, ...]
+#        print(vertex_ycbvideo.shape)
+#        print(k_ycbvideo)
+
+
         evaluate('./data/data-YCB.cfg',
                             #'../others/SegPose/weights_before_DA/yinlin_old_30.pth',
                             #'./official_weights/before_DA_BG.pth',
-                            './model/expDA_2_disc005-21.pth',
+                            './model/expDA_2_disc_1item_3-9.pth',
                             '/cvlabdata1/cvlab/datasets_pomini/YCB_Video_Dataset/YCB_Video_Dataset/val_100.txt',
                              #'./ycb-video-testlist.txt',
                              outdir, object_names_ycbvideo, k_ycbvideo, vertex_ycbvideo,
-                             bestCnt=10, conf_thresh=0.3, use_gpu=use_gpu)
+                             bestCnt=10, conf_thresh=0.8, use_gpu=use_gpu)
     elif dataset == 'our-YCB-Video':
         # intrinsics of YCB-VIDEO dataset
         fx = 385.788

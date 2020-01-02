@@ -6,8 +6,14 @@ class Pose2DLayer(nn.Module):
         super(Pose2DLayer, self).__init__()
         self.coord_norm_factor = 10
         self.keypoints = torch.from_numpy(np.load(options['keypointsfile'])).float()
+#        print("debug pose2dlayer: keypoints=", self.keypoints, "shape:", self.keypoints.shape)
         self.num_keypoints = int(options['num_keypoints'])
         self.keypoints = self.keypoints[:,:self.num_keypoints,:]
+
+        # for 1class
+        chosen_idx = 1
+        self.keypoints = self.keypoints[chosen_idx][None, ...]
+
         self.training = False
 
     def forward(self, output, target=None, param = None, adapt=False):

@@ -58,6 +58,18 @@ class YCB_Dataset(torch.utils.data.Dataset):
         self.one_syn_per_batch = one_syn_per_batch
         self.batch_size = batch_size
 
+        # for 1 class
+        self.images_with_chosen_class = np.load('./data/with_chosen_class.npy')
+#        self.num_syn_images = len(self.images_with_chosen_class)
+
+        self.images_with_chosen_class_target = np.load('./data/with_chosen_class_target.npy')
+        self.num_real_images = len(self.images_with_chosen_class_target)
+
+        # self.num_real_images = len(self.train_paths)
+
+#        self.with_chosen = []
+#        self.without_chosen = []
+
 
     def gen_train_list(self, imageset_path, out_pkl="data/real_train_path.pkl"):
         with open(opj(imageset_path, "trainval.txt"), 'r') as file:
@@ -107,7 +119,11 @@ class YCB_Dataset(torch.utils.data.Dataset):
             print("you need to give bg images folder!")
         # generate a synthetic image on the fly
         prefix = self.syn_data_path
-        id = random.randint(0, self.syn_range-1)
+        #id = random.randint(0, self.syn_range-1)
+
+        # temporary patch to get only images with cracker box (need to remove)
+        id = np.random.choice(self.images_with_chosen_class)
+
         item = opj(prefix, "%06d"%id)
         raw = cv2.imread(item + "-color.png")
         img = cv2.resize(raw, (self.input_height, self.input_width))
@@ -141,6 +157,24 @@ class YCB_Dataset(torch.utils.data.Dataset):
         seg_label = seg_img[:, :, 0] # RGB channels are the same
         seg_label = cv2.resize(seg_label, (self.target_h, self.target_w), interpolation=cv2.INTER_NEAREST)
 
+
+        # code for only 1 object: discard images without this object
+#        chosen_class = 2
+#        print("debug dataset: seg label shape:", seg_label.max(), seg_label.min())
+#        if not chosen_class in seg_label:
+#            print("NO")
+#            self.without_chosen.append(self.counter)
+#            #return self.gen_synthetic()
+#        else:
+#            self.with_chosen.append(self.counter)
+#        if self.counter % 1000 == 0:
+#            print(self.counter)
+#        if self.counter == 69999:
+#            print("DEBUG ycb: end. len total:", len(self.with_chosen) + len(self.without_chosen))
+#            np.save("./data/with_chosen_class.npy", np.array(self.with_chosen))
+#            np.save("./data/without_chosen_class.npy", np.array(self.without_chosen))
+#            print("len intersection: ", len([a for a in self.with_chosen if a in self.without_chosen]))
+#            exit(0)
 
         # generate kp gt map of (nH, nW, nV)
         kp_gt_map_x = np.zeros((self.target_h, self.target_w, self.n_kp))
@@ -224,7 +258,7 @@ class YCB_Dataset(torch.utils.data.Dataset):
         self.counter += 1
         if not self.use_real_img:
             return self.gen_synthetic()
-        if index > len(self.train_paths) - 1:
+        if index > self.num_real_images - 1:
             return self.gen_synthetic()
         # for DA, enforces that each batch has at least one source sample
         if self.one_syn_per_batch and self.counter % self.batch_size == 0:
@@ -232,7 +266,11 @@ class YCB_Dataset(torch.utils.data.Dataset):
         else:
 #            print("debug ycb_dataset: gen target image")
 
-            prefix = self.train_paths[index]
+#            prefix = self.train_paths[index]
+
+            # with 1 class
+            prefix = self.train_paths[self.images_with_chosen_class_target[index]]
+
             # get raw image
             raw = cv2.imread(prefix + "-color.png")
             img = cv2.resize(raw, (self.input_height, self.input_width))
@@ -245,6 +283,26 @@ class YCB_Dataset(torch.utils.data.Dataset):
             # get segmentation gt, note 0 is for background
             label_img = cv2.imread(prefix + "-label.png")[: , : , 0]
             label_img = cv2.resize(label_img, (self.target_h, self.target_w), interpolation=cv2.INTER_NEAREST)
+
+                    # code for only 1 object: discard images without this object
+#            chosen_class = 2
+#        print("debug dataset: seg label shape:", seg_label.max(), seg_label.min())
+#            if not chosen_class in label_img:
+#                print("NO:", index)
+#                self.without_chosen.append(index)
+#           #return self.gen_synthetic()
+#            else:
+#                self.with_chosen.append(self.counter)
+#            if index % 1000 == 0:
+#                print(index)
+#            if index == 133935:
+#                print("DEBUG ycb: end. len total:", len(self.with_chosen) + len(self.without_chosen))
+#                np.save("./data/with_chosen_class_target.npy", np.array(self.with_chosen))
+#                np.save("./data/without_chosen_class_target.npy", np.array(self.without_chosen))
+#                print("len intersection: ", len([a for a in self.with_chosen if a in self.without_chosen]))
+#                exit(0)
+
+#            exit(0)
 
             # generate kp gt map of (nH, nW, nV)
             kp_gt_map_x = np.zeros((self.target_h, self.target_w, self.n_kp))
@@ -268,7 +326,7 @@ class YCB_Dataset(torch.utils.data.Dataset):
 
     def __len__(self):
         if self.use_real_img:
-            return len(self.train_paths)+self.num_syn_images
+            return self.num_real_images + self.num_syn_images
         else:
             return self.num_syn_images
 
@@ -294,3 +352,4 @@ if __name__ == '__main__':
     ycb = YCB_Dataset(ycb_data_path, imageset_path, syn_data_path,
                       data_cfg="data/data-YCB.cfg",bg_path=bg_path, kp_path=kp_path)
     ycb.gen_kp_gt(for_syn=True, for_real=True) # generate and save kp gt used for training
+

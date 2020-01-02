@@ -26,6 +26,8 @@ class PoseSegLayer(nn.Module):
         # update object_scale according to nA and nH and nW
         # self.object_scale = nA * nH * nW * 0.01
 
+#        print("debug pos seg: input: ", output.size())
+
         output = output.view(nB * nA, (nC), nH * nW).transpose(0, 1). \
             contiguous().view((nC), nB * nA * nH * nW)
 
