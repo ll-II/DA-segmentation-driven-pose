@@ -1,9 +1,10 @@
 import os
 use_gpu = True
+
+# set the number of GPU before importing torch (this fixes some strange bugs)
 ngpu = 0
 if use_gpu:
     cuda_visible="0,1,2"
-    #gpu_id=[int(n) for n in cuda_visible.split(',')]
     gpu_id = range(len(cuda_visible.split(',')))
     ngpu = len(gpu_id)
     os.environ['CUDA_VISIBLE_DEVICES'] = cuda_visible
@@ -43,28 +44,18 @@ def network_grad_ratio(model):
             layercnt += 1
     gradsum /= layercnt
     datasum /= layercnt
-#    exit(0)
     return gradsum, datasum
 
 
 # choose dataset/env/exp info
 dataset = 'YCB-Video'
 test_env = 'pomini'
-exp_id = 'DA_2_disc_1item_3'
-#exp_id = '1_item_BG_2'
-#exp_id = 'debug'
+exp_id = 'exp_id'
 print(exp_id, test_env)
-
 
 
 print("available gpus: ",  torch.cuda.device_count())
 print(torch.cuda.get_device_properties(0))
-
-"""
-if test_env == 'sjtu':
-    ycb_root = "/media/data_2/YCB"
-    imageset_path = '/media/data_2/YCB/ycb_video_data_share/image_sets'
-"""
 
 # Paths
 if test_env == 'pomini':
@@ -77,28 +68,18 @@ kp_path = "./data/YCB-Video/YCB_bbox.npy"
 weight_path = lambda epoch: "./model/exp" + exp_id + "-" + str(epoch) + ".pth"
 load_weight_from_path = None
 #load_weight_from_path = "./official_weights/before_DA_BG.pth"
-#load_weight_from_path = "./official_weights/before_DA_BG-2disc.pth"
-#load_weight_from_path = "./model/exp1_item_BG_2-49.pth"
-load_weight_from_path = "./model/expDA_2_disc_1item_2-49.pth"
-
 
 # Device configuration
 if test_env == 'pomini':
-#    cuda_visible = "1"
-#    gpu_id = [1]
-    #batch_size = 18
     batch_size = 24
     num_workers = 6
-    use_real_img = True
-    syn_range = 70000 #70000
-    num_syn_img = 30000
-    save_interval = 2
+    syn_range = 70000
+    num_syn_img = 180000
+    save_interval = 1
     use_bg_img = True
     adapt = True
-#    adapt_only = True
+    use_real_img = adapt
     bg_path = "/cvlabdata1/cvlab/datasets_pomini/PASCAL3D+_release1.1/PASCAL/VOCdevkit/VOC2012/JPEGImages"
-
-#device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Hyper-parameters
 initial_lr = 0.0001
@@ -112,22 +93,18 @@ gen_kp_gt = False
 number_point = 8
 modulating_factor = 1.0
 
-# number of samples computed previously
+# number of samples computed previously, if load_weight_from_path != None (only used if multiflow is used)
 seen = 0
 
-# Device configuration
-#device = torch.device('cuda' if torch.cuda.is_available() and use_gpu else 'cpu')
 # summary writer
-if test_env =="sjtu":
-    writer = SummaryWriter(log_dir='./log'+exp_id, comment='training log')
-else:
-    writer = SummaryWriter(logdir='./log' + exp_id, comment='training log')
+writer = SummaryWriter(logdir='./log' + exp_id, comment='training log')
 
-#########
+
+#########  HELPER CODE TO ADAPT WEIGHTS #########
 from collections import OrderedDict
 import copy
 
-# helper to adapt weights when adding new layers
+# helper to adapt weights when adding new layers (increments the indexes of next layers)
 def update_weights_new_reversal(new_name = "./official_weights/before_DA.pth", reversal_indexes = [125, 133, 134, 140, 141]):
     result = OrderedDict()
     tmp_weights = torch.load(load_weight_from_path)
@@ -152,8 +129,8 @@ def update_weights_new_reversal(new_name = "./official_weights/before_DA.pth", r
 
     torch.save(result, new_name)
 
-# helper to adapt weight_state_dict when adding multiflow
-def adapt weight_state(state_dict, multiflow_indexes):
+# helper to adapt weight when adding multiflow units
+def adapt_weight_state(state_dict, multiflow_indexes, multiflow_sizes):
     result = None
 
     # keys have format 'models.012.bn......'
@@ -163,8 +140,8 @@ def adapt weight_state(state_dict, multiflow_indexes):
 
         suffix = k[prefix_len:]
         l2 = suffix.index('.')
-        print('debug: k: ', k, 'prefix ind: ', int(suffix[:l2]))
-        return int(prefix[:l2])
+#        print('debug: k: ', k, 'prefix ind: ', int(suffix[:l2]))
+        return int(suffix[:l2])
 
     def increment_key_layer(k):
         layer = get_layer_nr(k)
@@ -172,49 +149,57 @@ def adapt weight_state(state_dict, multiflow_indexes):
 
         # models.9.conv8.weight  -> models.9.models.i.0.conv8.weights  for i in range(...)
 
-    result = OrderedDict()
-    for multiflow_index in multiflow_indexes:
-        idx = 0
-        for k, v in state_dict.items():
+
+    result = None
+    cur_dict = state_dict
+    for multiflow_index, multiflow_size in zip(multiflow_indexes, multiflow_sizes):
+        result = OrderedDict()
+        first_multi_conv_idx = None
+
+        for k, v in cur_dict.items():
             layer = get_layer_nr(k)
-            if layer == multiflow_index:
+            if layer == multiflow_index or (layer > multiflow_index and layer - (multiflow_size - 1) <= multiflow_index):
                 print("DEBUG: k = ", k)
                 n_streams = 2
-                l = prefix_len + len(str(layer))  # 'models.9'
-                prefix = k[:l]
-                suffix = k[l:]
+#                l = prefix_len + len(str(layer))  # 'models.9'
+                prefix = k[:prefix_len] + str(multiflow_index)
+                suffix = k[prefix_len + len(str(layer)):]
+
+                conv_idx = int("".join(x for x in suffix if x.isdigit()))
+                if first_multi_conv_idx == None:
+                    first_multi_conv_idx = conv_idx
+                print("debug: k = ", k,  " conv nr = ", conv_idx, "first_multi_conv_idx = ", first_multi_conv_idx )
 
                 for stream in range(n_streams):
-                    new_k = prefix + '.models.' + str(stream) + '.' + str(idx) + suffix
+                    new_k = prefix + '.models.' + str(stream) + '.' + str(conv_idx - first_multi_conv_idx) + suffix
                     result[new_k] = copy.deepcopy(v)
                     print('   -> ', new_k)
             elif layer > multiflow_index:
 
                 print("DEBUG: k = ", k, " new_k = ", increment_key_layer(k))
                 result[increment_key_layer(k)] = copy.deepcopy(v)
+            else:
+                result[k] = copy.deepcopy(v)
 
-            idx += 1
+        cur_dict = result
+
     return result
 
-
-#update_weights_new_reversal()
+# example: adapt weights to add 10 multiflow units
+#old_weights = torch.load(load_weight_from_path)
+#new_weights = adapt_weight_state(old_weights, [9, 17, 24, 31, 38, 46, 53, 60, 67, 75], [2] * 10)
+#torch.save(new_weights, './model/test_adapt_multiflow-10.pth')
 #exit()
 
-##########
+# example: adapt weights to add 5 gradient reversal layers
+#update_weights_new_reversal(new_name = "./official_weights/before_DA.pth", reversal_indexes = [125, 133, 134, 140, 141])
+#exit()
+
+########## END HELPER CODE ##########
 
 def train(data_cfg):
     data_options = read_data_cfg(data_cfg)
     m = SegPoseNet(data_options)
-
-    # partial update of weights (if network structure changes)
-#    tmp_weights = torch.load(load_weight_from_path)
-#    tmp_state = m.coreModel.state_dict()
-#    for layer_i in range(126, 200):
-#        tmp_weights = {k: v for k, v in tmp_weights.items() if k in tmp_state and not "models."+str(layer_i) in k}
-#    tmp_state.update(tmp_weights)
-#    torch.save(tmp_state, './official_weights/before_DA_BG-2disc.pth')
-#    print(tmp_state.keys())
-#    exit()
 
     if load_weight_from_path is not None:
         m.load_weights(load_weight_from_path)
@@ -237,12 +222,11 @@ def train(data_cfg):
 
     one_syn_per_batch = False
     syn_min_rate = None
-    print("debug batch size: ", batch_size, "ngpu: ", ngpu)
-    if batch_size > 1 and ngpu > 1:
+
+    if batch_size > 1 and ngpu > 1 and adapt:
         one_syn_per_batch = True
         syn_min_rate = batch_size // ngpu
-        print("DEBUG syn min rate: ", syn_min_rate, flush = True)
-        assert syn_min_rate > 1, "The batch size must be at least the double of number of GPU"
+        assert syn_min_rate > 1, "For DA (adapt=True), the batch size must be at least the double of number of GPU"
 
     train_dataset = YCB_Dataset(ycb_data_path, imageset_path, syn_data_path=syn_data_path, target_h=o_h, target_w=o_w,
                       use_real_img=use_real_img, bg_path=bg_path, syn_range=syn_range, num_syn_images=num_syn_img,
@@ -253,26 +237,27 @@ def train(data_cfg):
     print('training on %d images'%len(train_dataset))
 
     # for multiflow, need to keep track of the training progress
-    m.coreModel.total_training_samples = seen + num_epoch * len(training_dataset)
-    print('total training samples:', m.coreModel.total_training_samples)
-    m.coreModel.seen = seen
+    m.module.coreModel.total_training_samples = seen + num_epoch * len(train_dataset)
+    print('total training samples:', m.module.coreModel.total_training_samples)
+    m.module.coreModel.seen = seen
 
 
     if gen_kp_gt:
         train_dataset.gen_kp_gt(for_syn=True, for_real=False)
 
     # Loss configurations
-    #print("DEBUG train.py: balacing weight: ", median_balancing_weight)
+
+    # use balancing weights for crossentropy log (used in Hu. Segmentation-driven-pose, not used here)
     #seg_loss = nn.CrossEntropyLoss(weight=median_balancing_weight)
 
     seg_loss = nn.CrossEntropyLoss()
     seg_loss_factor = 1 # 1
 
     pos_loss = nn.L1Loss()
-    pos_loss_factor = 2.6 #2,6  # 1.3
+    pos_loss_factor = 2.6 #2,6
 
     conf_loss = nn.L1Loss()
-    conf_loss_factor = 0.8 #0.8  # 0.02 in original paper
+    conf_loss_factor = 0.8 #0.8
 
     disc_loss = nn.CrossEntropyLoss()
     disc_loss_factor = 1
@@ -283,7 +268,6 @@ def train(data_cfg):
     pos_disc_loss = nn.CrossEntropyLoss()
     pos_disc_loss_factor = 1
 
-    #pos_loss_factor, conf_loss_factor = 2.6 , 0.8
 
     # split into train and val
     train_db, val_db = torch.utils.data.random_split(train_dataset, [len(train_dataset)-2000, 2000])
@@ -300,48 +284,7 @@ def train(data_cfg):
         i=-1
         for images, seg_label, kp_gt_x, kp_gt_y, mask_front, domains in tqdm(train_loader):
             i += 1
-#            continue
 
-#            print("kp x size: ", kp_gt_x.size())
- #           print("seg label: ", torch.max(seg_label), seg_label.size())
-
-            chosen_class = 2
-            class_mask = seg_label == chosen_class
-            not_class_mask = seg_label != chosen_class
-
-            kp_gt_x[not_class_mask[..., None].expand_as(kp_gt_x)] = 0
-            kp_gt_y[not_class_mask[..., None].expand_as(kp_gt_y)] = 0
-
-            seg_label[class_mask] = 1
-            seg_label[not_class_mask] = 0
-
-            # do no computations if the targeted object is not in the image
-#            if not seg_label.bool().any():
-#                print("ddebug: no object in this image: ", seg_label.sum())
-#                exit(0)
-#                continue
-
-
-#            print("test", test)
-
-            #kp_gt_x = kp_gt_x.permute(3,0,1,2)
-            #kp_gt_y = kp_gt_y.permute(3,0,1,2)
-            #print("kp x size after prmute: ", kp_gt_x.size())
-            #for i_point in range(number_point):
-            #    tmp = kp_gt_x[i_point]
-            #    print("tmp size:", tmp.size())
-            #    kp_gt_x[i_point][test] = 0
-            #    kp_gt_y[i_point][not_class_idx] = 0
-            #seg_label[class_idx] = 1
-            #seg_label[not_class_idx] = 0
-
-#            print("class index: ", class_idx, class_idx.size())
-
- #           print("max seg label: ", torch.max(seg_label))
- #           print("non zero points x: ", torch.nonzero(kp_gt_x != 0).size())
-
-
-#            print("DEBUG train.py: seg_label shape: ", seg_label.size(), "domains shape: ", domains.size())
             if use_gpu:
                 images = images.cuda()
                 seg_label = seg_label.cuda()
@@ -350,17 +293,15 @@ def train(data_cfg):
                 mask_front = mask_front.cuda()
                 domains = domains.cuda()
 
-            #print("DEBUG train.py, gt_x = ", kp_gt_x.size(), " , gt_y = ", kp_gt_y.size())
-            #for x in range(76):
-                #for y in range(76):
-                    #pass
-                    #print("X: ", x, "Y: ", y)
-                    #print(kp_gt_x[:, x, y, :])
 
             d = domains[:, 0, 0].view(-1)
             zero_source = d.bool().all()
             domains = domains.view(-1)
-           # print("DEBUG: domains = ", d, "zero source: ", zero_source, flush=True)
+
+
+            # if adapt=True, skip the batch if it contains zero source (synthetic) samples
+            if adapt and zero_source:
+                continue
 
             # forward pass
             output = m(images, adapt=adapt, domains=d)
@@ -369,61 +310,45 @@ def train(data_cfg):
             pred_domains = output[2]
             seg_pred_domains = output[3]
             pos_pred_domains = output[4]
- #           print("DEBUG train.py: pred domains shape: ", pred_domains.size(), "domains final shape: ", domains.size())
             l_disc = disc_loss(pred_domains, domains)
 
             l_seg_disc = seg_disc_loss(seg_pred_domains, d)
             l_pos_disc = pos_disc_loss(pos_pred_domains, d)
 
-#            print("debug d: ", d.shape, "domains: ", domains.shape, flush=True)
 
-            # if adapt=True, compute the other losses only if there is at least one source sample
-            if adapt and zero_source:
-                 # TODO this happen with 1 gpu
-                print("BUG train.py: no source samples in one batch.")
-                #all_loss = l_disc * disc_loss_factor
-                exit(1)
-            else:
-  #              print("DEBUG seg label shape: ", seg_label.size())
-                if adapt:
-                 #   print("DEBUG :", output[0], flush=True)
-                    seg_label = source_only(seg_label, d)
-  #              print("DEBUG seg label shape after source only: ", seg_label.size())
 
-                # segmentation
-                pred_seg = output[0] # (BxOHxOW,C)
-                seg_label = seg_label.view(-1)
-                #print("DEBUG train pred_seg after source only:", pred_seg.size())
-                l_seg = seg_loss(pred_seg, seg_label)
+            if adapt:
 
-   #             print("DEBUG train. seg shape:", pred_seg.size(), "seg label shape: ", seg_label.size())
+                seg_label = source_only(seg_label, d)
 
-                # regression
-                mask_front = mask_front.repeat(number_point,1, 1, 1).permute(1,2,3,0).contiguous() # (B,OH,OW,NV)
-                if adapt:
-                    mask_front = source_only(mask_front, d)
-                    kp_gt_x = source_only(kp_gt_x, d)
-                    kp_gt_y = source_only(kp_gt_y, d)
-                pred_x = output[1][0] * mask_front # (B,OH,OW,NV)
-                pred_y = output[1][1] * mask_front
-                kp_gt_x = kp_gt_x.float() * mask_front
-                kp_gt_y = kp_gt_y.float() * mask_front
-                l_pos = pos_loss(pred_x, kp_gt_x) + pos_loss(pred_y, kp_gt_y)
+            # segmentation
+            pred_seg = output[0] # (BxOHxOW,C)
+            seg_label = seg_label.view(-1)
+            l_seg = seg_loss(pred_seg, seg_label)
 
-                # confidence
-                conf = output[1][2] * mask_front # (B,OH,OW,NV)
-                bias = torch.sqrt((pred_y-kp_gt_y)**2 + (pred_x-kp_gt_x)**2)
-                conf_target = torch.exp(-modulating_factor * bias) * mask_front
-                conf_target = conf_target.detach()
-                l_conf = conf_loss(conf, conf_target)
+            # regression
+            mask_front = mask_front.repeat(number_point,1, 1, 1).permute(1,2,3,0).contiguous() # (B,OH,OW,NV)
+            if adapt:
+                mask_front = source_only(mask_front, d)
+                kp_gt_x = source_only(kp_gt_x, d)
+                kp_gt_y = source_only(kp_gt_y, d) 
+            pred_x = output[1][0] * mask_front # (B,OH,OW,NV)
+            pred_y = output[1][1] * mask_front
+            kp_gt_x = kp_gt_x.float() * mask_front
+            kp_gt_y = kp_gt_y.float() * mask_front
+            l_pos = pos_loss(pred_x, kp_gt_x) + pos_loss(pred_y, kp_gt_y)
 
-                # combine all losses
- #               if not adapt_only:
-                all_loss = l_seg * seg_loss_factor + l_pos * pos_loss_factor + l_conf * conf_loss_factor
-                if adapt:
-                    all_loss += l_disc * disc_loss_factor + l_seg_disc * seg_disc_loss_factor + l_pos_disc * pos_disc_loss_factor
-  #              else:
-  #                  all_loss = l_disc * disc_loss_factor
+            # confidence
+            conf = output[1][2] * mask_front # (B,OH,OW,NV)
+            bias = torch.sqrt((pred_y-kp_gt_y)**2 + (pred_x-kp_gt_x)**2)
+            conf_target = torch.exp(-modulating_factor * bias) * mask_front
+            conf_target = conf_target.detach()
+            l_conf = conf_loss(conf, conf_target)
+
+            # combine all losses
+            all_loss = l_seg * seg_loss_factor + l_pos * pos_loss_factor + l_conf * conf_loss_factor
+            if adapt:
+                all_loss += l_disc * disc_loss_factor + l_seg_disc * seg_disc_loss_factor + l_pos_disc * pos_disc_loss_factor
 
             optimizer.zero_grad()
             all_loss.backward()
@@ -441,15 +366,12 @@ def train(data_cfg):
             acc = correct/total * 100
 
             _, seg_binary_domains = torch.max(seg_pred_domains, 1)
-            n_seg_target_pred = seg_binary_domains.float().sum()
             correct = (seg_binary_domains == d).float().sum()
             total = d.size(0)
             seg_disc_acc = correct/total * 100
 
-#            print("debug train: n_target_ored:", n_target_pred, "seg_binary:", seg_binary_domains, "d: ", d, "correct: ", correct, "seg_acc:", seg_disc_acc)
 
             _, pos_binary_domains = torch.max(pos_pred_domains, 1)
-            n_pos_target_pred = pos_binary_domains.float().sum()
             correct = (pos_binary_domains == d).float().sum()
             total = d.size(0)
             pos_disc_acc = correct/total * 100
@@ -459,30 +381,20 @@ def train(data_cfg):
                     for layer_i in range(first_disc_layer, last_disc_layer+1):
                         if "model." + str(layer_i) in name:
                             param.requires_grad = require_grad
-     #                   print(name)
-
-#            if acc >= 90:
-#                set_disc(False)
-#            elif acc <= 80:
-#                set_disc(True)
-
-
 
             if (i + 1) % 20 == 0 and not zero_source:
                 # compute pixel-wise bias to measure training accuracy
                 bias_acc.update(abs(pnz((pred_x - kp_gt_x).cpu()).mean()*i_w))
 
                 print('Epoch [{}/{}], Step [{}/{}]: \n seg loss: {:.4f}, pos loss: {:.4f}, conf loss: {:.4f}, pixel-wise bias:{:.4f} '
-                      'disc loss: {:.4f}, disc acc: {:.4f}, n target predictions: {:.4f} '
-                      'disc seg loss: {:.4f}, disc seg acc: {:.4f}, n seg target predictions: {:.4f} '
-                      'disc pos loss: {:.4f}, disc pos acc: {:.4f}, n pos target predictions: {:.4f} '
+                      'disc loss: {:.4f}, disc acc: {:.4f} '
+                      'disc seg loss: {:.4f}, disc seg acc: {:.4f} '
+                      'disc pos loss: {:.4f}, disc pos acc: {:.4f} '
                       .format(epoch + 1, num_epoch, i + 1, total_step, l_seg.item(), l_pos.item(), l_conf.item(), bias_acc.value,
-                             l_disc.item(), acc.item(), n_target_pred.item(),
-                             l_seg_disc.item(), seg_disc_acc.item(), n_seg_target_pred.item(),
-                             l_pos_disc.item(), pos_disc_acc.item(), n_pos_target_pred.item()
+                             l_disc.item(), acc.item(),
+                             l_seg_disc.item(), seg_disc_acc.item(),
+                             l_pos_disc.item(), pos_disc_acc.item(),
                      ))
-
-
 
                 writer.add_scalar('seg_loss', l_seg.item(), epoch*total_step+i)
                 writer.add_scalar('pos loss', l_pos.item(), epoch*total_step+i)
@@ -491,16 +403,12 @@ def train(data_cfg):
 
                 writer.add_scalar('disc_loss', l_disc.item(), epoch*total_step+i)
                 writer.add_scalar('disc_acc', acc.item(), epoch*total_step+i)
-                writer.add_scalar('n_target_preds', n_target_pred.item(), epoch*total_step+i)
-
 
                 writer.add_scalar('seg_disc_loss', l_seg_disc.item(), epoch*total_step+i)
                 writer.add_scalar('seg_disc_acc', seg_disc_acc.item(), epoch*total_step+i)
-                writer.add_scalar('n_seg_target_preds', n_seg_target_pred.item(), epoch*total_step+i)
 
                 writer.add_scalar('pos_disc_loss', l_pos_disc.item(), epoch*total_step+i)
                 writer.add_scalar('pos_disc_acc', pos_disc_acc.item(), epoch*total_step+i)
-                writer.add_scalar('n_pos_target_preds', n_pos_target_pred.item(), epoch*total_step+i)
 
         bias_acc._reset()
         scheduler.step()

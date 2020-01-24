@@ -6,14 +6,8 @@ class Pose2DLayer(nn.Module):
         super(Pose2DLayer, self).__init__()
         self.coord_norm_factor = 10
         self.keypoints = torch.from_numpy(np.load(options['keypointsfile'])).float()
-#        print("debug pose2dlayer: keypoints=", self.keypoints, "shape:", self.keypoints.shape)
         self.num_keypoints = int(options['num_keypoints'])
         self.keypoints = self.keypoints[:,:self.num_keypoints,:]
-
-        # for 1class
-        chosen_idx = 1
-        self.keypoints = self.keypoints[chosen_idx][None, ...]
-
         self.training = False
 
     def forward(self, output, target=None, param = None, adapt=False):
@@ -30,13 +24,6 @@ class Pose2DLayer(nn.Module):
         nH = output.data.size(2)
         nW = output.data.size(3)
 
-#        if nB == 0:
-#             return output.view(0, nH, nW, nV)
-#            print("DEBUG pose2d, NB = 0")
-#            empty = Variable(torch.empty([]).view(nB, nH, nW, nV), require_grad = False)
-#            with torch.no_grad():
-#                empty = torch.zeros(0,nH,nW,nV).cuda()
-#                return [empty, empty, empty]
         output = output.view(nB * nA, (3 * nV), nH * nW).transpose(0, 1). \
             contiguous().view((3 * nV), nB * nA * nH * nW)
 

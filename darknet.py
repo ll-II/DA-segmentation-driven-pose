@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from reversal import GradientReversal
+from multiflow import MultiflowUnit
 from cfg import *
 
 class MaxPoolStride1(nn.Module):
@@ -78,6 +79,9 @@ class Darknet(nn.Module):
         self.height = height
         self.channels = channels
 
+        # number of domains (2 in our case)
+        self.domains = domains
+
         self.blocks = parse_cfg(cfgfile)
         self.models = self.create_network(self.blocks) # merge conv,bn,leaky
 
@@ -87,13 +91,9 @@ class Darknet(nn.Module):
         self.total_training_samples = None
         self.seen = None
 
-        # number of domains (2 in our case)
-        self.domains = domains
-
-    def forward(self, x, y = None):
-
-        print("debug darknet: seen += ", x.size(0))
-        self.seen += x.size(0)
+    def forward(self, x, domains = None):
+        if self.training:
+            self.seen += x.size(0)
         ind = -1
         outputs = dict()
         desiredOutputIdx = []
@@ -105,16 +105,13 @@ class Darknet(nn.Module):
                 continue
 
             elif block['type'] == 'multiflow':
-                param = {'progress': min(self.seen/self.total_training_samples, 1)}
-                x = self.models[ind](x, param=param)
+
+                # progress: 0 at 0%, 1 at 100% of the training.
+                progress = min(self.seen/self.total_training_samples, 1) if self.training else 1
+                x = self.models[ind](x, domains=domains, progress=progress)
                 outputs[ind] = x
 
             elif block['type'] in ['convolutional', 'deconvolutional', 'maxpool', 'reorg', 'upsample', 'avgpool', 'softmax', 'connected', 'gradient_reversal']:
-
-#                if block['type'] == 'connected':
-#                    print(x.size(), flush=True)
-#                    print(x.flatten(start_dim=1, end_dim=-1).size(), flush=True)
-
                 x = self.models[ind](x)
                 outputs[ind] = x
 
@@ -149,7 +146,7 @@ class Darknet(nn.Module):
                 print('unknown type %s' % (block['type']))
 
         desiredOutput = []
-        for idx in desiredOutputIdx: # two output layers
+        for idx in desiredOutputIdx: # 4 output layers
             desiredOutput.append(outputs[idx])
         return desiredOutput
 
@@ -227,13 +224,11 @@ class Darknet(nn.Module):
                     multiflow_list.append(model)
                     multiflow_index += 1
 
-                    # end of multiflow block.   PERS NOTE: may move the 6 ligns below at the beginning of the loop
+                    # end of multiflow block.
                     if multiflow_index == multiflow_size:
                         multiflow_model = nn.Sequential(*multiflow_list)
-                        print("debug multiflow module paraam: ", multiflow_model.state_dict().keys())
                         multiflow_unit = MultiflowUnit(multiflow_model, self.domains, n_multiflow_streams)
                         models.append(multiflow_unit)
-                        print("debug multiflow unit param: ", multiflow_unit.state_dict().keys())
                         inside_multiflow = False
 
                         # add empty modules for each skipped block, for index consistency

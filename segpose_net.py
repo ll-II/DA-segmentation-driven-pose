@@ -27,13 +27,11 @@ class SegPoseNet(nn.Module):
         self.training = False
 
     def forward(self, x, y = None, adapt = False, domains = None):
-        outlayers = self.coreModel(x)
+        outlayers = self.coreModel(x, domains=domains)
 
         if self.training and adapt:
-            #print("DEBUG segpose net: seg before source only", outlayers[0].size(), 'domains=', domains, flush=True)
             in1 = source_only(outlayers[0], domains)
             in2 = source_only(outlayers[1], domains)
-            #print("DEBUG segpose net: seg before source only", in1.size(), flush=True)
         else:
             in1 = outlayers[0]
             in2 = outlayers[1]
@@ -42,11 +40,6 @@ class SegPoseNet(nn.Module):
         out4 = outlayers[3]
         out5 = outlayers[4]
 
-        if adapt and in1.size(0) == 0:
-            print("BUG segpose.py: domains = ", domains)
-#           in1 = in1.detach()
-#           in2 = in2.detach()
-#        else:
         out1 = self.segLayer(in1)
         out2 = self.regLayer(in2)
 

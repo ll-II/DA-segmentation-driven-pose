@@ -111,12 +111,7 @@ def show_seg(img, output, batchIdx, width, height):
     cls_ids = output[0][1][batchIdx]
     segshowimg = np.copy(img)
 
-    #segshowimg = img.clone()
-    #segshowimg = segshowimg.permute(0, 2, 3, 1).numpy()
-
     nC = cls_ids.max() + 1
-
-    print("debug utils nC: ", nC)
 
     for cidx in range(nC):
         # skip background
@@ -135,12 +130,10 @@ def show_seg(img, output, batchIdx, width, height):
             tmpy = int(((labIdx[i][0] + 0.5) / nH) * height + 0.5)
             tmpx = int(((labIdx[i][1] + 0.5) / nW) * width + 0.5)
             tmpr = 7
-#            print("DEBUG:", type(segshowimg), type(tmpx), type(tmpy), type(tmpr), get_class_colors(cidx))
             cv2.rectangle(segshowimg, (tmpx-tmpr,tmpy-tmpr), (tmpx+tmpr,tmpy+tmpr), get_class_colors(cidx), -1)
-#            print("DEBUG:, ", (tmpx-tmpr,tmpy-tmpr), "to: ", (tmpx+tmpr,tmpy+tmpr), " ; color : ", get_class_colors(cidx))
     return segshowimg
 
-def do_detect(model, rawimg, intrinsics, bestCnt, conf_thresh, use_gpu=False, seg_save_path=None):
+def do_detect(model, rawimg, intrinsics, bestCnt, conf_thresh, use_gpu=False, domains=None, seg_save_path=None):
     model.eval()
     t0 = time.time()
 
@@ -159,17 +152,19 @@ def do_detect(model, rawimg, intrinsics, bestCnt, conf_thresh, use_gpu=False, se
     img = Variable(img)
     t2 = time.time()
 
-    out_preds = model(img)
+    out_preds = model(img, domains=domains)
 
+    # save predicted segmentation
     if seg_save_path:
         seg_img = show_seg(rawimg, out_preds, 0, width, height)
-        print("DEBUG seg path: ", seg_save_path)
+
+        print("save segmentation image to: ", seg_save_path)
         cv2.imwrite(seg_save_path, seg_img)
 
 
     t3 = time.time()
 
-    predPose, p2d = fusion(out_preds, width, height, intrinsics, conf_thresh, 0, bestCnt, rawimg, seg_save_path)
+    predPose, p2d, repro_dict = fusion(out_preds, width, height, intrinsics, conf_thresh, 0, bestCnt, rawimg, seg_save_path)
 
     t4 = time.time()
 
@@ -183,7 +178,7 @@ def do_detect(model, rawimg, intrinsics, bestCnt, conf_thresh, use_gpu=False, se
         print('          fusion : %f' % (t4 - t3))
         print('           total : %f' % (t4 - t0))
         print('-----------------------------------')
-    return predPose
+    return predPose, repro_dict
 
 def fusion(output, width, height, intrinsics, conf_thresh, batchIdx, bestCnt, rawimg, seg_save_path):
     layerCnt = len(output)
@@ -203,6 +198,8 @@ def fusion(output, width, height, intrinsics, conf_thresh, batchIdx, bestCnt, ra
 
     outPred = []
     p2d = None
+
+    repro_dict = {}
 
     mx = predx.mean(axis=2) # average x positions
     my = predy.mean(axis=2) # average y positions
@@ -263,15 +260,14 @@ def fusion(output, width, height, intrinsics, conf_thresh, batchIdx, bestCnt, ra
         if len(p3d) < 6:
             continue
 
-        #c DEBUG: show the selected 2D reprojections
+        # DEBUG: show the selected 2D reprojections
         if True:
             for i in range(len(p2d)):
                 x = p2d[i][0]
                 y = p2d[i][1]
                 inlierImg = cv2.circle(inlierImg, (int(x), int(y)), 2, get_class_colors(cidx), -1)
-#        print("debug utils.py: p3d p2d sum non", np.isnan(p3d).sum(), np.isnan(p2d).sum())
+
         retval, rot, trans, inliers = cv2.solvePnPRansac(p3d, p2d, intrinsics, None, flags=cv2.SOLVEPNP_EPNP)
-#        print("debug utils rot trans sum nan", np.isnan(trans).sum(), np.isnan(rot).sum())
         if not retval:
             continue
 
@@ -279,13 +275,21 @@ def fusion(output, width, height, intrinsics, conf_thresh, batchIdx, bestCnt, ra
         T = trans.reshape(-1, 1)
         rt = np.concatenate((R, T), 1)
 
+        # DEBUG: compute predicted points in pixel after reprojection ( note: 8, the number of keypoints, is hardcoded )
+        pred_kp = vertices_reprojection(p3d, rt, intrinsics)
+        pred_kp = pred_kp[:8, :]
+        if pred_kp.shape[0] == 8:
+            repro_dict[cidx+1] = pred_kp
+
         outPred.append([cidx, rt, 1, None, None, None, [cidx], -1, [0], [0], None])
 
-    points_path = seg_save_path[:-4] + "-points.jpg"
-    print("DEBUG: save points to ", points_path)
-    cv2.imwrite(points_path, inlierImg)
+    # save image of predicted keypoints with best confidence (before reporojection)
+    if seg_save_path:
+        points_path = seg_save_path[:-4] + "-points.jpg"
+        print("save predicted points to ", points_path)
+        cv2.imwrite(points_path, inlierImg)
 
-    return outPred, p2d
+    return outPred, p2d, repro_dict
 
 def read_data_cfg(datacfg):
     options = dict()
@@ -321,6 +325,7 @@ def visualize_predictions(predPose, image, vertex, intrinsics):
 
         # show surface reprojection
         maskImg.fill(0)
+
         if True:
             # if False:
             vp = vertices_reprojection(vertex[outid][:], rt, intrinsics)

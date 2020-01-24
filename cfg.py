@@ -8,7 +8,7 @@ def parse_cfg(cfgfile):
         line = line.rstrip()
         if line == '' or line[0] == '#':
             line = fp.readline()
-            continue        
+            continue
         elif line[0] == '[':
             if block:
                 blocks.append(block)
@@ -165,6 +165,14 @@ def print_cfg(blocks, width, height, channels):
             out_widths.append(prev_width)
             out_heights.append(prev_height)
             out_filters.append(prev_filters)
+        elif block['type'] == 'multiflow':
+            n_layers = int(block['n_layers'])
+            n_streams = int(block['n_streams'])
+            print('%5d %-6s   n layers = %d , n streams = %d' % (ind, 'multiflow', n_layers, n_streams))
+            out_widths.append(prev_width)
+            out_heights.append(prev_height)
+            out_filters.append(prev_filters)
+
         else:
             print('unknown type %s' % (block['type']))
 

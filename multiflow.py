@@ -46,18 +46,18 @@ class MultiflowUnit(nn.Module):
         #self.models = [type(model)() for n in range(n_streams)]
         self.models = nn.ModuleList([copy.deepcopy(model) for n in range(n_streams)])
 
-        if state_dict:
+#        if state_dict:
             # update state of each copy using 'state_dict' , if provided
-            pretrained_dict = {k: v for k, v in state_dict.items() if k in model}
-        else:
+#            pretrained_dict = {k: v for k, v in state_dict.items() if k in model}
+#        else:
             # otherwise, copy weights and stuffs from the 'model' object
-            pretrained_dict = model.state_dict()
+#            pretrained_dict = model.state_dict()
 
-        print("DEBUG model state dict: ", pretrained_dict.keys())
-        print("DEBUG self.model state dict: ", self.models[0].state_dict().keys())
+#        print("DEBUG model state dict: ", pretrained_dict.keys())
+#        print("DEBUG self.model state dict: ", self.models[0].state_dict().keys())
 
-        for model in self.models:
-            model.load_state_dict(pretrained_dict)
+#        for model in self.models:
+#            model.load_state_dict(pretrained_dict)
 
         # initialize each gate in the range [-0.01, 0.01]
         if init_params == 'random':
@@ -66,16 +66,17 @@ class MultiflowUnit(nn.Module):
 
         # the trainable params of our multiflow unit :  gate_param[domain][stream]
         self.gate_param = nn.Parameter(initial_value, requires_grad=True)
+        self.gate_param.cuda()
 
         # plasticity scheduler: for now only 'linear' is supported
         if plasticity_scheduler == 'linear':
-            self.placticity = lambda progress: min + (max - min) * progress
+            self.plasticity = lambda progress: min + (max - min) * progress
 
 
-    def forward(self, x, y, param = None):
+    def forward(self, x, domains, progress):
 
-        assert 'progress' in param
-        progress = float(param['progress'])
+        #assert 'progress' in param
+        #progress = float(param['progress'])
         p = self.plasticity(progress)
 
         """
@@ -114,22 +115,30 @@ class MultiflowUnit(nn.Module):
 
 
 
-        domains = y[3].data
+        #domains = y[3].data
         batch_size = domains.size(0)
 
-        dummies_domain = torch.zeros(batch_size, self.n_domains)
-        dummies_domain[:, domains] = 1
+#        dummies_domain = torch.zeros(batch_size, self.n_domains)
+#        dummies_domain.cuda()
+
+#        dummies_domain = torch.eye(self.n_domains)[domains]
+        dummies_domain = nn.functional.one_hot(domains, num_classes = self.n_domains)
+        dummies_domain = dummies_domain.cuda().float()
 
         # compute weights for each flow
         gate = self.gate_activation_function(self.gate_param * p)
 
-        print("DEBUG: domains: ", domains, "dummies: ", dummies_domain, "gate param: ", gate)
+#        print("DEBUG: dummies: ", dummies_domain, "gate param: ", gate, "domains: ", domains)
 
-
-        weights = (dummies_domain @ gate)
-
-        responses = torch.stack([model(x) for model in self.models])
+        weights = (dummies_domain @ gate).t()
+        outputs = [model(x) for model in self.models]
+#        print("debug multiflow: outputs(0) = ", outputs[0].size(), "len outputs:", len(outputs))
+        responses = torch.stack(outputs, dim=-1)
+#        print("debug multiflow outputs size: ", responses.size(), "weights:", weights, weights.size())
 
         # return weighted sum
-        result = (responses @ weight).sum(dim=0)
+        result = (responses @ weights)
+#        print("debug result: ", result.size())
+        result = result.sum(dim=-1)
+#        print("debug result:", result.size())
         return result
